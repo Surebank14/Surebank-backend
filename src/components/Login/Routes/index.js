@@ -1,6 +1,6 @@
 const express = require('express');
 const loginController = require('../Controller/index');
-const {staffAuth} = require('../../Middleware/index')
+const { staffAuth, adminOnly } = require('../../Middleware/index')
 
 const router = express.Router();
 
@@ -10,7 +10,10 @@ router.post('/staff', loginController.staffLogin);
 router.get('/customercount', loginController.getCustomers);
 router.get('/repcustomercount', staffAuth, loginController.getRepCustomers);
 router.get('/branchcustomercount/:id', loginController.getBranchCustomers);
-router.post('/staff/block-all-users', staffAuth, loginController.blockAllUsers);
-router.post('/staff/unblock-all-users', staffAuth, loginController.unblockAllUsers);
+router.get('/newcustomers', loginController.getNewCustomers);
+router.get('/repnewcustomers', staffAuth, loginController.getRepNewCustomers);
+router.get('/branchnewcustomers/:id', loginController.getBranchNewCustomers);
+router.post('/staff/block-all-users', staffAuth, adminOnly, loginController.blockAllUsers);
+router.post('/staff/unblock-all-users', staffAuth, adminOnly, loginController.unblockAllUsers);
 
 module.exports = router;

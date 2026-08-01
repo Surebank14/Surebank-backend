@@ -13,6 +13,9 @@ const customerSchema = new mongoose.Schema({
     type: String, 
     required: true 
 },
+  email: {
+    type: String,
+  },
 
   address: {
     type: String,
@@ -27,6 +30,19 @@ const customerSchema = new mongoose.Schema({
     required: true,
     default: "false"
   },
+  passwordResetOtp: {
+    type: String,
+    select: false
+  },
+  passwordResetOtpExpiresAt: {
+    type: Date,
+    select: false
+  },
+  passwordResetOtpAttempts: {
+    type: Number,
+    default: 0,
+    select: false
+  },
   accountManagerId: {
     type: String,
   },
@@ -39,6 +55,20 @@ const customerSchema = new mongoose.Schema({
     ref:'Branch',
     required: true
 
+  },
+  settlementBankDetails: {
+    bankName: {
+      type: String,
+      default: '',
+    },
+    accountName: {
+      type: String,
+      default: '',
+    },
+    bankAccountNumber: {
+      type: String,
+      default: '',
+    },
   }
 },
 {timestamps:true}

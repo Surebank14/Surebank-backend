@@ -16,8 +16,18 @@ require('dotenv').config()
         });
         const status = 'open';
         const hasBeenCharged = "false"
-          const { accountNumber, amountPerDay, accountManagerId,accountType } = req.body;
-          const newDSAccount = await DSAccountService.createDSAccount({ accountNumber,amountPerDay,createdBy,startDate,status,accountManagerId,hasBeenCharged, accountType });
+          const { accountNumber, amountPerDay, accountManagerId,accountType, bankName, accountName, bankAccountNumber, settlementBankDetails } = req.body;
+          const newDSAccount = await DSAccountService.createDSAccount({
+            accountNumber,
+            amountPerDay,
+            createdBy,
+            startDate,
+            status,
+            accountManagerId,
+            hasBeenCharged,
+            accountType,
+            settlementBankDetails: settlementBankDetails || { bankName, accountName, bankAccountNumber },
+          });
           res.status(201).json({ message: newDSAccount.message, DSAccount: newDSAccount.newDSAccount });
         } catch (error) {
           res.status(500).json({ message: 'Server error', error: error.message });
@@ -120,6 +130,26 @@ require('dotenv').config()
         res.status(500).json({ message: error.message });
       }
     }
+      const mainDeposit = async (req, res) => {
+        try{
+        const contributionInput = req.body;
+        const createdBy = req.staff.staffId;
+        const result = await DSAccountService.mainDeposit({ ...contributionInput, createdBy});
+        res.status(200).json({data:result,message:'Deposit successful'});
+      }catch(error){
+        res.status(500).json({ message: error.message });
+      }
+    }
+      const transferWalletToPackageAccount = async (req, res) => {
+        try{
+        const contributionInput = req.body;
+        const createdBy = req.staff.staffId;
+        const result = await DSAccountService.transferWalletToPackageAccount({ ...contributionInput, createdBy});
+        res.status(200).json({data:result,message:'Wallet transferred successfully'});
+      }catch(error){
+        res.status(500).json({ message: error.message });
+      }
+    }
 
   module.exports = {
     createDSAccount,
@@ -131,5 +161,7 @@ require('dotenv').config()
     reverseDailyContribution,
     reverseDailyContributionCharge,
     freeToWithdrawReversal,
-    mainWithdrawal
+    mainWithdrawal,
+    mainDeposit,
+    transferWalletToPackageAccount
   };

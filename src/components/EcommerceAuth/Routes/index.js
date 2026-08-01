@@ -1,0 +1,26 @@
+const express = require('express');
+const router = express.Router();
+const EcommerceAuthController = require('../Controller/index');
+const { customerAuth } = require('../../Middleware/index');
+
+// Public routes
+router.post('/register', EcommerceAuthController.register);
+router.post('/login', EcommerceAuthController.login);
+router.get('/check-phone', EcommerceAuthController.checkPhone);
+router.post('/forgot-password', EcommerceAuthController.forgotPassword);
+router.post('/reset-password', EcommerceAuthController.resetPassword);
+router.post('/admin-forced-reset-password', EcommerceAuthController.resetAdminForcedPassword);
+
+// Protected routes
+router.get('/profile', customerAuth, EcommerceAuthController.getProfile);
+router.put('/profile', customerAuth, EcommerceAuthController.updateProfile);
+router.put('/change-password', customerAuth, EcommerceAuthController.changePassword);
+router.get('/wallet', customerAuth, EcommerceAuthController.getWallet);
+router.post('/wallet/ds-package', customerAuth, EcommerceAuthController.createDSAccount);
+router.put('/wallet/ds-package/:id', customerAuth, EcommerceAuthController.updateDSAccountDailyAmount);
+router.post('/wallet/free-to-withdraw/request', customerAuth, EcommerceAuthController.createFreeToWithdrawRequest);
+router.post('/wallet/fund/initialize', customerAuth, EcommerceAuthController.initializeWalletFunding);
+router.post('/wallet/ds-package/fund/initialize', customerAuth, EcommerceAuthController.initializeDSAccountFunding);
+router.get('/wallet/fund/verify/:reference', customerAuth, EcommerceAuthController.verifyWalletFunding);
+
+module.exports = router;

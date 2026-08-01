@@ -145,6 +145,26 @@ const bcrypt = require('bcrypt')
                               res.status(500).json({ message: error.message });
                           }
                         }
+      const getAllBranchFreeToWithdrawWithdrawal = async (req, res) => {
+                          try {
+                            const staff = req.staff.staffId;
+                            const {date} = req.body
+                              const withdrawal = await accountTransactionService.getAllBranchFreeToWithdrawWithdrawal(date,staff);
+                              res.status(200).json(withdrawal);
+                          } catch (error) {
+                              res.status(500).json({ message: error.message });
+                          }
+                        }
+      const getBranchFreeToWithdrawWithdrawalReport = async (req, res) => {
+                          try {
+                            const staff = req.staff.staffId;
+                            const {date} = req.body
+                              const report = await accountTransactionService.getBranchFreeToWithdrawWithdrawalReport(date,staff);
+                              res.status(200).json(report);
+                          } catch (error) {
+                              res.status(500).json({ message: error.message });
+                          }
+                        }
       const getAllBranchDailyDSAccountCharge = async (req, res) => {
                           try {
                               const {date,branchId} = req.body
@@ -313,6 +333,50 @@ const bcrypt = require('bcrypt')
                 }
               }
 
+              const getBranchEcommerceDeposit = async (req, res) => {
+                const staff = req.staff.staffId;
+                const { date } = req.body;
+                try {
+                    const ecommerceDeposit = await accountTransactionService.getBranchEcommerceDeposit(date, staff);
+                    res.status(200).json(ecommerceDeposit);
+                } catch (error) {
+                    res.status(500).json({ message: error.message });
+                }
+              }
+
+              const getBranchEcommerceDepositReport = async (req, res) => {
+                const staff = req.staff.staffId;
+                const { date } = req.body;
+                try {
+                    const report = await accountTransactionService.getBranchEcommerceDepositReport(date, staff);
+                    res.status(200).json(report);
+                } catch (error) {
+                    res.status(500).json({ message: error.message });
+                }
+              }
+
+              const getBranchEcommerceDSDeposit = async (req, res) => {
+                const staff = req.staff.staffId;
+                const { date } = req.body;
+                try {
+                    const ecommerceDSDeposit = await accountTransactionService.getBranchEcommerceDSDeposit(date, staff);
+                    res.status(200).json(ecommerceDSDeposit);
+                } catch (error) {
+                    res.status(500).json({ message: error.message });
+                }
+              }
+
+              const getBranchEcommerceDSDepositReport = async (req, res) => {
+                const staff = req.staff.staffId;
+                const { date } = req.body;
+                try {
+                    const report = await accountTransactionService.getBranchEcommerceDSDepositReport(date, staff);
+                    res.status(200).json(report);
+                } catch (error) {
+                    res.status(500).json({ message: error.message });
+                }
+              }
+
       module.exports = {
         getAllBranchDSAccount,
         getAllFDAccount,
@@ -328,6 +392,8 @@ const bcrypt = require('bcrypt')
         getAllBranchDailyDSAccount,
         getAllBranchDailyFDAccount,
         getAllBranchDailyDSAccountWithdrawal,
+        getAllBranchFreeToWithdrawWithdrawal,
+        getBranchFreeToWithdrawWithdrawalReport,
         getAllBranchDailyDSAccountCharge,
         getAllBranchDailySBAccount,
         getAllBranchDailySBAccountWithdrawal,
@@ -345,4 +411,8 @@ const bcrypt = require('bcrypt')
         getBranchExpenditureReport,
         getTransaction,
         getBranchOrder,
+        getBranchEcommerceDeposit,
+        getBranchEcommerceDepositReport,
+        getBranchEcommerceDSDeposit,
+        getBranchEcommerceDSDepositReport,
       };

@@ -12,6 +12,8 @@ router.post('/dailyrepfd', staffAuth,AcountTransactionController.getAllRepDailyF
 router.post('/dailyrepsb',staffAuth, AcountTransactionController.getAllRepDailySBAccount);
 router.post('/totaldailyrepcontribution',staffAuth, AcountTransactionController.getAllRepDailyContribution);
 router.post('/dailyrepdswithdrawal',staffAuth, AcountTransactionController.getAllRepDailyDSAccountWithdrawal);
+router.post('/repfwwithdrawal',staffAuth, AcountTransactionController.getAllRepFreeToWithdrawWithdrawal);
+router.post('/repfwwithdrawalreport',staffAuth, AcountTransactionController.getRepFreeToWithdrawWithdrawalReport);
 router.post('/repdspackage',staffAuth, AcountTransactionController.getAllRepDSAccountPackage);
 router.post('/repsbpackage',staffAuth, AcountTransactionController.getAllRepSBAccountPackage);
 router.post('/reppackages',staffAuth, AcountTransactionController.getAllRepAccountPackage);
@@ -25,6 +27,10 @@ router.post('/repdsincomereport',staffAuth, AcountTransactionController.getRepDS
 router.post('/repexpenditurereport',staffAuth, AcountTransactionController.getRepExpenditureReport);
 router.post('/reptransaction', staffAuth, AcountTransactionController.getTransaction);
 router.post('/reporder', staffAuth, AcountTransactionController.getRepOrder);
+router.post('/repecommercedeposit', staffAuth, AcountTransactionController.getRepEcommerceDeposit);
+router.post('/repecommercedepositreport', staffAuth, AcountTransactionController.getRepEcommerceDepositReport);
+router.post('/repecommercedsdeposit', staffAuth, AcountTransactionController.getRepEcommerceDSDeposit);
+router.post('/repecommercedsdepositreport', staffAuth, AcountTransactionController.getRepEcommerceDSDepositReport);
 router.post('/repfdpackage', staffAuth, AcountTransactionController.getAllFDPackage);
 router.post('/repfd', staffAuth, AcountTransactionController.getAllFDAccount);
 

@@ -12,6 +12,8 @@ router.post('/dailybranchfd', staffAuth,AcountTransactionController.getAllBranch
 router.post('/dailybranchsb',staffAuth, AcountTransactionController.getAllBranchDailySBAccount);
 router.post('/totaldailybranchcontribution',staffAuth, AcountTransactionController.getAllBranchDailyContribution);
 router.post('/dailybranchdswithdrawal',staffAuth, AcountTransactionController.getAllBranchDailyDSAccountWithdrawal);
+router.post('/branchfwwithdrawal',staffAuth, AcountTransactionController.getAllBranchFreeToWithdrawWithdrawal);
+router.post('/branchfwwithdrawalreport',staffAuth, AcountTransactionController.getBranchFreeToWithdrawWithdrawalReport);
 router.post('/branchdspackage',staffAuth, AcountTransactionController.getAllBranchDSAccountPackage);
 router.post('/branchsbpackage',staffAuth, AcountTransactionController.getAllBranchSBAccountPackage);
 router.post('/branchpackages',staffAuth, AcountTransactionController.getAllBranchAccountPackage);
@@ -25,6 +27,10 @@ router.post('/branchdsincomereport',staffAuth, AcountTransactionController.getBr
 router.post('/branchexpenditurereport',staffAuth, AcountTransactionController.getBranchExpenditureReport);
 router.post('/branchtransaction', staffAuth, AcountTransactionController.getTransaction);
 router.post('/branchorder', staffAuth, AcountTransactionController.getBranchOrder);
+router.post('/branchecommercedeposit', staffAuth, AcountTransactionController.getBranchEcommerceDeposit);
+router.post('/branchecommercedepositreport', staffAuth, AcountTransactionController.getBranchEcommerceDepositReport);
+router.post('/branchecommercedsdeposit', staffAuth, AcountTransactionController.getBranchEcommerceDSDeposit);
+router.post('/branchecommercedsdepositreport', staffAuth, AcountTransactionController.getBranchEcommerceDSDepositReport);
 router.post('/branchfd', staffAuth, AcountTransactionController.getAllFDAccount);
 router.post('/branchfdreport', staffAuth, AcountTransactionController.getAllFDTransaction);
 router.post('/branchfdinterestincome', staffAuth, AcountTransactionController.getAllFDInterestIncome);

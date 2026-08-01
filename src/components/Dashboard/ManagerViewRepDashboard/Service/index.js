@@ -7,7 +7,110 @@ const Expenditure = require('../../../Expenditure/Model');
 const Staff = require('../../../Staff/Model');
 const FDAccount = require('../../../FDAccount/Model');
 const Customer = require('../../../Customer/Model/index')
+
+const normalizeDateInput = (dateInput) => {
+  if (dateInput && typeof dateInput === 'object' && !Array.isArray(dateInput)) {
+    return {
+      date: dateInput.date || '',
+      startDate: dateInput.startDate || '',
+      endDate: dateInput.endDate || '',
+    };
+  }
+
+  return { date: dateInput || '', startDate: '', endDate: '' };
+};
+
+const getStartOfDay = (value) => {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const getEndOfDay = (value) => {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const buildCumulativeCreatedAtQuery = (dateInput) => {
+  const { date, startDate, endDate } = normalizeDateInput(dateInput);
+
+  if (startDate || endDate) {
+    const createdAt = {};
+    if (startDate) {
+      createdAt.$gte = getStartOfDay(startDate);
+    }
+    createdAt.$lte = endDate ? getEndOfDay(endDate) : getEndOfDay(new Date());
+    return createdAt;
+  }
+
+  return { $lte: date ? getEndOfDay(date) : getEndOfDay(new Date()) };
+};
+
+const buildDailyCreatedAtQuery = (dateInput) => {
+  const { date, startDate, endDate } = normalizeDateInput(dateInput);
+
+  if (startDate || endDate) {
+    const createdAt = {};
+    if (startDate) {
+      createdAt.$gte = getStartOfDay(startDate);
+    }
+    createdAt.$lte = endDate ? getEndOfDay(endDate) : getEndOfDay(new Date());
+    return createdAt;
+  }
+
+  const effectiveDate = date || new Date();
+  return {
+    $gte: getStartOfDay(effectiveDate),
+    $lte: getEndOfDay(effectiveDate),
+  };
+};
 const Order =require('../../../SBAccount/Model/order')
+
+const ECOMMERCE_DEPOSIT_NARRATION_PATTERN = /^(Wallet Funding|SB Order Wallet Funding|Order Payment to Wallet)/i;
+const STAFF_SB_ORDER_WALLET_DEPOSIT_NARRATION_PATTERN = /^(Deposited by .* for Order|SB Order Wallet Deposit)/i;
+const STAFF_STATS_QUERY_FILTER = { $ne: true };
+const STAFF_TRANSACTION_EXCLUDED_NARRATION_QUERY = {
+  $not: /^(Wallet Transfer to SB Account|To (SB|DS) account .* from wallet)/i
+};
+
+const buildStaffSBContributionQuery = (filters = {}) => ({
+  ...filters,
+  direction: 'Credit',
+  excludeFromStaffStats: STAFF_STATS_QUERY_FILTER,
+  $or: [
+    {
+      package: 'SB',
+      narration: STAFF_TRANSACTION_EXCLUDED_NARRATION_QUERY
+    },
+    {
+      package: 'Wallet',
+      narration: { $regex: STAFF_SB_ORDER_WALLET_DEPOSIT_NARRATION_PATTERN }
+    }
+  ]
+});
+
+const buildStaffTransactionHistoryQuery = (createdBy) => ({
+  createdBy,
+  excludeFromStaffStats: STAFF_STATS_QUERY_FILTER,
+  $or: [
+    {
+      package: { $in: ['SB', 'DS', 'FD'] },
+      direction: { $in: ['Debit', 'Credit'] },
+      narration: STAFF_TRANSACTION_EXCLUDED_NARRATION_QUERY
+    },
+    {
+      package: 'Wallet',
+      direction: 'Credit',
+      narration: { $regex: STAFF_SB_ORDER_WALLET_DEPOSIT_NARRATION_PATTERN }
+    }
+  ]
+});
+
+const formatCustomerName = (customer) => {
+  if (!customer) return 'N/A';
+  return `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.phone || 'N/A';
+};
 
 const getBranchStaff = async (staff) =>{
   // const branch = await Staff.findOne({_id:staff})
@@ -20,12 +123,12 @@ const getBranchStaff = async (staff) =>{
 }
 async function getAllRepDSAccount(date = null, staff) {
  
-    let query = { package: 'DS', direction: 'Credit',createdBy:staff };
+    let query = { package: 'DS', direction: 'Credit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
    
     // Filter by date if provided or default to today
     const endDate = date ? new Date(date) : new Date();
     endDate.setHours(23, 59, 59, 999);
-    query.createdAt = { $lte: endDate };
+    query.createdAt = buildCumulativeCreatedAtQuery(date);
     const transactions = await AccountTransaction.find(query);
     
     // // Sort transactions by createdAt in ascending order
@@ -49,12 +152,12 @@ async function getAllRepDSAccount(date = null, staff) {
 }
 async function getAllRepDSAccountWithdrawal(date = null, staff) {
    
-    let query = { package: 'DS', direction: 'Debit',createdBy:staff };
+    let query = { package: 'DS', direction: 'Debit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
 
      // Filter by date if provided or default to today
      const endDate = date ? new Date(date) : new Date();
      endDate.setHours(23, 59, 59, 999);
-     query.createdAt = { $lte: endDate };
+     query.createdAt = buildCumulativeCreatedAtQuery(date);
 
 
     const transactions = await AccountTransaction.find(query);
@@ -68,11 +171,11 @@ async function getAllRepDSAccountWithdrawal(date = null, staff) {
 
 async function getAllRepDSAccountCharge(date = null, staff) {
   
-    let query = { package: 'DS', direction: 'Charge',createdBy:staff };
+    let query = { package: 'DS', direction: 'Charge',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
        // Filter by date if provided or default to today
        const endDate = date ? new Date(date) : new Date();
        endDate.setHours(23, 59, 59, 999);
-       query.createdAt = { $lte: endDate };
+       query.createdAt = buildCumulativeCreatedAtQuery(date);
      
     const transactions = await AccountTransaction.find(query);
     
@@ -84,13 +187,13 @@ async function getAllRepDSAccountCharge(date = null, staff) {
 
 async function getAllRepSBAccount(date = null, staff) {
 
-    let query = { package: 'SB', direction: 'Credit',createdBy:staff };
+    let query = buildStaffSBContributionQuery({ createdBy: staff });
     
    
     // Filter by date if provided or default to today
     const endDate = date ? new Date(date) : new Date();
     endDate.setHours(23, 59, 59, 999);
-    query.createdAt = { $lte: endDate };
+    query.createdAt = buildCumulativeCreatedAtQuery(date);
   
   
     const transactions = await AccountTransaction.find(query);
@@ -114,12 +217,12 @@ async function getAllRepSBAccount(date = null, staff) {
 }
 async function getAllRepSBAccountWithdrawal(date = null, staff ) {
  
-    let query = { package: 'SB', direction: 'Debit',createdBy:staff };
+    let query = { package: 'SB', direction: 'Debit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
 
      // Filter by date if provided or default to today
      const endDate = date ? new Date(date) : new Date();
      endDate.setHours(23, 59, 59, 999);
-     query.createdAt = { $lte: endDate };
+     query.createdAt = buildCumulativeCreatedAtQuery(date);
 
 
     const transactions = await AccountTransaction.find(query);
@@ -139,7 +242,7 @@ async function getAllRepSBandDSAccount(date = null, staff) {
 }
 async function getAllRepDailyDSAccount(date = null, staff) {
 
-    let query = { package: 'DS', direction: 'Credit',createdBy:staff };
+    let query = { package: 'DS', direction: 'Credit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
    // Filter by date if provided or default to today
    const targetDate = date ? new Date(date) : new Date();
 
@@ -151,7 +254,7 @@ async function getAllRepDailyDSAccount(date = null, staff) {
    const endDate = new Date(targetDate);
    endDate.setHours(23, 59, 59, 999);
    
-   query.createdAt = { $gte: startDate, $lte: endDate };
+   query.createdAt = buildDailyCreatedAtQuery(date);
 
     const transactions = await AccountTransaction.find(query);
     
@@ -191,7 +294,7 @@ async function getDailyReversalTotal(date = null, staff = null) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
 
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
 
     if (staff) {
         query.transactionOwnerId = staff;
@@ -218,7 +321,7 @@ async function getAllRepDailyFDAccount(date = null, staff) {
    const endDate = new Date(targetDate);
    endDate.setHours(23, 59, 59, 999);
    
-   query.createdAt = { $gte: startDate, $lte: endDate };
+   query.createdAt = buildDailyCreatedAtQuery(date);
 
     const transactions = await AccountTransaction.find(query);
     
@@ -237,7 +340,7 @@ async function getAllRepDailyFDAccount(date = null, staff) {
 }
 async function getAllRepDailyDSAccountChargeByDate(date = null, staff) {
   
-    let query = { package: 'DS', direction: 'Charge',createdBy:staff };
+    let query = { package: 'DS', direction: 'Charge',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
     
    
     const targetDate = date ? new Date(date) : new Date();
@@ -250,7 +353,7 @@ async function getAllRepDailyDSAccountChargeByDate(date = null, staff) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
     
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
     
 
   
@@ -264,7 +367,7 @@ async function getAllRepDailyDSAccountChargeByDate(date = null, staff) {
 }
 async function getAllRepDailyDSAccountWithdrawalByDate(date = null, staff) {
  
-    let query = { package: 'DS', direction: 'Debit',createdBy:staff };
+    let query = { package: 'DS', direction: 'Debit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
   
     const targetDate = date ? new Date(date) : new Date();
 
@@ -276,7 +379,7 @@ async function getAllRepDailyDSAccountWithdrawalByDate(date = null, staff) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
     
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
     
 
   
@@ -290,7 +393,7 @@ async function getAllRepDailyDSAccountWithdrawalByDate(date = null, staff) {
   }
   async function getAllRepDailySBAccount(date = null, staff) {
    
-    let query = { package: 'SB', direction: 'Credit',createdBy:staff };
+    let query = buildStaffSBContributionQuery({ createdBy: staff });
     // Filter by date if provided or default to today
     const targetDate = date ? new Date(date) : new Date();
  
@@ -302,7 +405,7 @@ async function getAllRepDailyDSAccountWithdrawalByDate(date = null, staff) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
     
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
     
      
   
@@ -317,7 +420,7 @@ async function getAllRepDailyDSAccountWithdrawalByDate(date = null, staff) {
 
 async function getAllRepDailySBAccountWithdrawal(date = null, staff) {
 
-    let query = { package: 'SB', direction: 'Debit',createdBy:staff };
+    let query = { package: 'SB', direction: 'Debit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
   
     const targetDate = date ? new Date(date) : new Date();
 
@@ -329,7 +432,7 @@ async function getAllRepDailySBAccountWithdrawal(date = null, staff) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
     
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
     
   
  
@@ -343,7 +446,7 @@ async function getAllRepDailySBAccountWithdrawal(date = null, staff) {
 }
 async function getAllRepDailyDSAccountWithdrawal(date = null, staff) {
   
-    let query = { package: 'DS', direction: 'Debit',createdBy:staff };
+    let query = { package: 'DS', direction: 'Debit',createdBy:staff, excludeFromStaffStats: STAFF_STATS_QUERY_FILTER };
   
     const targetDate = date ? new Date(date) : new Date();
 
@@ -355,7 +458,7 @@ async function getAllRepDailyDSAccountWithdrawal(date = null, staff) {
     const endDate = new Date(targetDate);
     endDate.setHours(23, 59, 59, 999);
     
-    query.createdAt = { $gte: startDate, $lte: endDate };
+    query.createdAt = buildDailyCreatedAtQuery(date);
     
   
  
@@ -376,15 +479,55 @@ async function getAllRepDailySBandDSAccount(date = null, staff) {
     
     return totalContribution;
 }
-async function getAllRepDSAccountPackage(date = null, staff) {
 
-    // Use today's date if none is provided
-    const endDate = date ? new Date(date) : new Date();
-    endDate.setHours(23, 59, 59, 999); // Include the full day
-  
-    // Build query with date filter
+async function getRepEcommerceDeposit(date = null, staff) {
+  const query = {
+    package: 'Wallet',
+    direction: 'Credit',
+    createdBy: staff,
+    narration: { $regex: ECOMMERCE_DEPOSIT_NARRATION_PATTERN }
+  };
+
+  const endDate = date ? new Date(date) : new Date();
+  endDate.setHours(23, 59, 59, 999);
+  query.createdAt = buildCumulativeCreatedAtQuery(date);
+
+  const transactions = await AccountTransaction.find(query).select('amount').lean();
+  return transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+}
+
+async function getRepEcommerceDepositReport(date = null, staff) {
+  const query = {
+    package: 'Wallet',
+    direction: 'Credit',
+    createdBy: staff,
+    narration: { $regex: ECOMMERCE_DEPOSIT_NARRATION_PATTERN }
+  };
+
+  const endDate = date ? new Date(date) : new Date();
+  endDate.setHours(23, 59, 59, 999);
+  query.createdAt = buildCumulativeCreatedAtQuery(date);
+
+  const transactions = await AccountTransaction.find(query)
+    .populate({
+      path: 'customerId',
+      model: 'Customer',
+      select: 'firstName lastName phone'
+    })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return transactions.map((transaction) => ({
+    _id: transaction._id,
+    customerName: formatCustomerName(transaction.customerId),
+    narration: transaction.narration,
+    amount: Number(transaction.amount || 0),
+    date: transaction.createdAt,
+  }));
+}
+async function getAllRepDSAccountPackage(date = null, staff) {
     const query = {
-      createdAt: { $lte: endDate },
+      createdAt: buildCumulativeCreatedAtQuery(date),
       accountManagerId:staff
     };
   
@@ -400,14 +543,8 @@ async function getAllRepDSAccountPackage(date = null, staff) {
   
   
 async function getAllRepSBAccountPackage(date = null, staff) {
-
-    // Use today's date if none is provided
-    const endDate = date ? new Date(date) : new Date();
-    endDate.setHours(23, 59, 59, 999); // Include the full day
-  
-    // Build query with date filter
     const query = {
-      createdAt: { $lte: endDate },
+      createdAt: buildCumulativeCreatedAtQuery(date),
       accountManagerId:staff
     };
   
@@ -483,14 +620,8 @@ async function getRepAllSBandDSIncome(date = null, staff) {
       return totalContribution;
   }
   async function getRepAllExpenditure(date = null, staff) {
-  
-    // Use today's date if none is provided
-    const endDate = date ? new Date(date) : new Date();
-    endDate.setHours(23, 59, 59, 999); // Include the full day
-  
-    // Build query with date filter
     const query = {
-      createdAt: { $lte: endDate },
+      createdAt: buildCumulativeCreatedAtQuery(date),
       createdBy:staff,
       status:1
     };
@@ -587,11 +718,7 @@ const getRepExpenditureReport = async (staff) => {
       }
   
       // Fetch transactions and populate createdBy and customer details
-      const transactions = await AccountTransaction.find({
-        package: { $in: ['SB', 'DS','FD'] }, // Match either 'SB' or 'DS'
-        direction: { $in: ['Debit', 'Credit'] }, // Match either 'Debit' or 'Credit'
-        createdBy, // Ensuring createdBy is always included
-      })
+      const transactions = await AccountTransaction.find(buildStaffTransactionHistoryQuery(createdBy))
         .populate({
           path: 'createdBy', // Populate createdBy to get Rep details
           model: 'Staff'
@@ -646,30 +773,16 @@ const getRepExpenditureReport = async (staff) => {
     }
   };
   async function getAllFDPackage(date = null, staff) {
-    // const branch = await Staff.findOne({_id:staff})
-    // const branchId = branch.branchId
     try {
-      // Use today's date if none is provided
-      const endDate = date ? new Date(date) : new Date();
-      endDate.setHours(23, 59, 59, 999); // Include the full day
-    
-      // Build query with date filter
       const query = {
-        createdAt: { $lte: endDate },
-        accountManagerId:staff
+        accountManagerId: staff,
+        createdAt: buildCumulativeCreatedAtQuery(date),
       };
-    
-      // Optionally filter by Rep
-      // if (RepId) {
-      //   query.RepId = RepId;
-      // }
-    
-      // Count matching documents
-      const countPackage = await FDAccount.countDocuments(query);
-      return countPackage;
+
+      return await FDAccount.countDocuments(query);
     } catch (error) {
       console.error("Error fetching FD accounts:", error);
-      return { totalBalance: 0, count: 0 };
+      return 0;
     }
   }
   async function getAllFDAccount(date = null, staff) {
@@ -681,7 +794,7 @@ const getRepExpenditureReport = async (staff) => {
       // Set end of the provided date or today
       const endDate = date ? new Date(date) : new Date();
       endDate.setHours(23, 59, 59, 999);
-      query.createdAt = { $lte: endDate };
+      query.createdAt = buildCumulativeCreatedAtQuery(date);
   
       // Filter by branch if branchId is provided
       // if (branchId) {
@@ -715,27 +828,20 @@ const getRepExpenditureReport = async (staff) => {
     async function getReferralStaff(staffs, date = null) {
   
     try {
-      // Use today's date if none is provided
-      const endDate = date ? new Date(date) : new Date();
-      endDate.setHours(23, 59, 59, 999); // Include the full day
-    
-      // Build query with date filter
       const query = {
-        createdAt: { $lte: endDate },
-        referral:staffs
+        referral:staffs,
+        createdAt: buildCumulativeCreatedAtQuery(date),
       };
-      // Count matching documents
-      const countReferral = await Staff.countDocuments(query);
-      return countReferral;
+
+      return await Staff.countDocuments(query);
     } catch (error) {
       console.error("Error fetching Referral accounts:", error);
-      return { totalBalance: 0, count: 0 };
+      return 0;
     }
   }
 async function getReferralStaffDetails(referralId, date = null) {
   try {
-    const endDate = date ? new Date(date) : new Date();
-    endDate.setHours(23, 59, 59, 999); // Include full day
+    const createdAtQuery = buildCumulativeCreatedAtQuery(date);
 
     // Recursive helper to get full referral chain
     const fetchReferralChain = async (id, collected = new Set()) => {
@@ -744,7 +850,7 @@ async function getReferralStaffDetails(referralId, date = null) {
 
       const directReferrals = await Staff.find({
         referral: id,
-        createdAt: { $lte: endDate },
+        createdAt: createdAtQuery,
       }).lean();
 
       let allReferrals = [...directReferrals];
@@ -848,5 +954,7 @@ module.exports = {
     getCustomerByRep,
       getReferralStaff,
       getReferralStaffDetails,
-      getStaffOrderCounts
+      getStaffOrderCounts,
+      getRepEcommerceDeposit,
+      getRepEcommerceDepositReport
   };

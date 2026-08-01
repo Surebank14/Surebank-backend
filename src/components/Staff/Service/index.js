@@ -34,7 +34,7 @@ const getStaffByPhone = async (phone) => {
 
 const getStaff = async () =>{
   try {
-      return await Staff.find({});
+      return await Staff.find({ role: { $ne: 'Admin' } });
   } catch (error) {
       throw error;
   }
@@ -44,18 +44,25 @@ const getBranchStaff = async (staff) =>{
   const branch = await Staff.findOne({_id:staff})
   const branchId = branch.branchId
   try {
-      return await Staff.find({branchId:branchId});
+      return await Staff.find({branchId:branchId, role: { $ne: 'Admin' }});
   } catch (error) {
       throw error;
   }
 }
 const updateStaff = async (details) => {
   try {
-    const { staff, status } = details;
+    const { staff, status, role } = details;
+    const updateFields = {};
+    if (status) updateFields.status = status;
+    if (role) updateFields.role = role;
+
+    if (Object.keys(updateFields).length === 0) {
+      throw new Error("No staff update supplied");
+    }
 
     const updatedStaff = await Staff.findOneAndUpdate(
       { _id: staff },
-      { $set: { status } },
+      { $set: updateFields },
       { new: true }
     );
 
@@ -66,7 +73,7 @@ const updateStaff = async (details) => {
     return { success: true, message: "Updated successfully", updatedStaff };
   } catch (error) {
     console.error("Error updating staff:", error);
-    throw new Error("An error occurred while updating the staff status.");
+    throw new Error(error.message || "An error occurred while updating the staff.");
   }
 };
 const updateStaffPassword = async (details) => {
@@ -90,6 +97,32 @@ const updateStaffPassword = async (details) => {
   }
 };
 
+const updateStaffSignature = async ({ staffId, signatureUrl, uploadedBy }) => {
+  if (!signatureUrl) {
+    throw new Error("Signature image is required");
+  }
+
+  const updatedStaff = await Staff.findByIdAndUpdate(
+    staffId,
+    {
+      $set: {
+        signature: {
+          url: signatureUrl,
+          uploadedAt: new Date(),
+          uploadedBy
+        }
+      }
+    },
+    { new: true }
+  ).select('-password');
+
+  if (!updatedStaff) {
+    throw new Error("Staff not found or update failed");
+  }
+
+  return { success: true, message: "Staff signature updated successfully", updatedStaff };
+};
+
 
 module.exports = {
     createStaff,
@@ -99,5 +132,6 @@ module.exports = {
     updateStaff,
     resetStaffPassword,
     getStaffByPhone,
-    updateStaffPassword
+    updateStaffPassword,
+    updateStaffSignature
   };

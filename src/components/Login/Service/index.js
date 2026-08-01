@@ -1,9 +1,294 @@
 const Customer = require('../../Customer/Model/index');
 const Staff = require('../../Staff/Model/index');
 const Login = require('../Model/index')
+const AccountTransaction = require('../../AccountTransaction/Model/index');
+const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken')
 require('dotenv').config()
+
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ''));
+
+const buildCustomerUsageReport = async (query = {}) => {
+    const periodStart = new Date();
+    periodStart.setDate(periodStart.getDate() - 30);
+
+    const logins = await Login.find(query)
+      .populate({
+          path: 'branchId',
+          model: 'Branch',
+      })
+      .populate({
+          path: 'customerId',
+          model: 'Customer',
+      })
+      .lean();
+
+    const customerIds = logins
+      .map((login) => login.customerId?._id?.toString() || login.customerId?.toString())
+      .filter(Boolean);
+
+    const staffIds = [...new Set(logins
+      .map((login) => login.accountManagerId?.toString())
+      .filter((id) => id && isValidObjectId(id)))];
+
+    const [dsTotals, sbTotals, periodDsTotals, periodSbTotals, staffList] = await Promise.all([
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'DS',
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            credit: {
+              $sum: {
+                $cond: [{ $eq: ['$direction', 'Credit'] }, '$amount', 0]
+              }
+            },
+            debit: {
+              $sum: {
+                $cond: [{ $in: ['$direction', ['Debit', 'Charge']] }, '$amount', 0]
+              }
+            },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'SB',
+            direction: { $in: ['Debit', 'Purchased', 'Bought', 'Delivered'] },
+            narration: { $not: /^Reversed payment reservation for changed product:/i }
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            total: { $sum: '$amount' },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'DS',
+            createdAt: { $gte: periodStart },
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            credit: {
+              $sum: {
+                $cond: [{ $eq: ['$direction', 'Credit'] }, '$amount', 0]
+              }
+            },
+            debit: {
+              $sum: {
+                $cond: [{ $in: ['$direction', ['Debit', 'Charge']] }, '$amount', 0]
+              }
+            },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'SB',
+            direction: { $in: ['Debit', 'Purchased', 'Bought', 'Delivered'] },
+            narration: { $not: /^Reversed payment reservation for changed product:/i },
+            createdAt: { $gte: periodStart },
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            total: { $sum: '$amount' },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      Staff.find({ _id: { $in: staffIds } }).select('_id firstName lastName role branchId').lean()
+    ]);
+
+    const dsTotalMap = new Map(dsTotals.map((item) => [item._id?.toString(), item]));
+    const sbTotalMap = new Map(sbTotals.map((item) => [item._id?.toString(), item]));
+    const periodDsTotalMap = new Map(periodDsTotals.map((item) => [item._id?.toString(), item]));
+    const periodSbTotalMap = new Map(periodSbTotals.map((item) => [item._id?.toString(), item]));
+    const staffMap = new Map(staffList.map((staff) => [staff._id.toString(), staff]));
+
+    return logins.map((login) => {
+      const customerId = login.customerId?._id?.toString() || login.customerId?.toString();
+      const ds = dsTotalMap.get(customerId) || {};
+      const sb = sbTotalMap.get(customerId) || {};
+      const periodDs = periodDsTotalMap.get(customerId) || {};
+      const periodSb = periodSbTotalMap.get(customerId) || {};
+      const staff = staffMap.get(login.accountManagerId?.toString()) || null;
+      const dsCredit = Number(ds.credit || 0);
+      const dsDebit = Number(ds.debit || 0);
+      const dsNet = Math.max(0, dsCredit - dsDebit);
+      const sbPurchaseTotal = Number(sb.total || 0);
+      const periodDsCredit = Number(periodDs.credit || 0);
+      const periodDsDebit = Number(periodDs.debit || 0);
+      const periodDsNet = Math.max(0, periodDsCredit - periodDsDebit);
+      const periodSbPurchaseTotal = Number(periodSb.total || 0);
+
+      return {
+        ...login,
+        accountManager: staff ? {
+          _id: staff._id,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          role: staff.role,
+          branchId: staff.branchId,
+        } : null,
+        performance: {
+          dsTotal: dsNet,
+          dsCreditTotal: dsCredit,
+          dsDebitTotal: dsDebit,
+          dsTransactionCount: Number(ds.transactions || 0),
+          sbPurchaseTotal,
+          sbTransactionCount: Number(sb.transactions || 0),
+          combinedTotal: dsNet + sbPurchaseTotal,
+          last30Days: {
+            dsTotal: periodDsNet,
+            dsCreditTotal: periodDsCredit,
+            dsDebitTotal: periodDsDebit,
+            dsTransactionCount: Number(periodDs.transactions || 0),
+            sbPurchaseTotal: periodSbPurchaseTotal,
+            sbTransactionCount: Number(periodSb.transactions || 0),
+            combinedTotal: periodDsNet + periodSbPurchaseTotal,
+          },
+        }
+      };
+    });
+};
+
+const buildNewCustomerReport = async (query = {}) => {
+    const periodStart = new Date();
+    periodStart.setDate(periodStart.getDate() - 30);
+
+    const customers = await Customer.find({
+      ...query,
+      createdAt: { $gte: periodStart },
+    })
+      .lean();
+
+    const customerIds = customers.map((customer) => customer._id.toString());
+    const branchIds = [...new Set(customers
+      .map((customer) => customer.branchId?.toString())
+      .filter((id) => id && isValidObjectId(id)))];
+    const staffIds = [...new Set(customers
+      .map((customer) => customer.accountManagerId?.toString())
+      .filter((id) => id && isValidObjectId(id)))];
+
+    const Branch = require('../../Branch/Model/index');
+
+    const [logins, periodDsTotals, periodSbTotals, staffList, branchList] = await Promise.all([
+      Login.find({ customerId: { $in: customerIds } }).lean(),
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'DS',
+            createdAt: { $gte: periodStart },
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            credit: {
+              $sum: {
+                $cond: [{ $eq: ['$direction', 'Credit'] }, '$amount', 0]
+              }
+            },
+            debit: {
+              $sum: {
+                $cond: [{ $in: ['$direction', ['Debit', 'Charge']] }, '$amount', 0]
+              }
+            },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      AccountTransaction.aggregate([
+        {
+          $match: {
+            customerId: { $in: customerIds },
+            package: 'SB',
+            direction: { $in: ['Debit', 'Purchased', 'Bought', 'Delivered'] },
+            narration: { $not: /^Reversed payment reservation for changed product:/i },
+            createdAt: { $gte: periodStart },
+          }
+        },
+        {
+          $group: {
+            _id: '$customerId',
+            total: { $sum: '$amount' },
+            transactions: { $sum: 1 }
+          }
+        }
+      ]),
+      Staff.find({ _id: { $in: staffIds } }).select('_id firstName lastName role branchId').lean(),
+      Branch.find({ _id: { $in: branchIds } }).select('_id name address branchKey').lean()
+    ]);
+
+    const loginMap = new Map(logins.map((login) => [login.customerId?.toString(), login]));
+    const periodDsTotalMap = new Map(periodDsTotals.map((item) => [item._id?.toString(), item]));
+    const periodSbTotalMap = new Map(periodSbTotals.map((item) => [item._id?.toString(), item]));
+    const staffMap = new Map(staffList.map((staff) => [staff._id.toString(), staff]));
+    const branchMap = new Map(branchList.map((branch) => [branch._id.toString(), branch]));
+
+    return customers.map((customer) => {
+      const customerId = customer._id.toString();
+      const login = loginMap.get(customerId) || {};
+      const periodDs = periodDsTotalMap.get(customerId) || {};
+      const periodSb = periodSbTotalMap.get(customerId) || {};
+      const staff = staffMap.get(customer.accountManagerId?.toString()) || null;
+      const branch = branchMap.get(customer.branchId?.toString()) || customer.branchId;
+      const periodDsCredit = Number(periodDs.credit || 0);
+      const periodDsDebit = Number(periodDs.debit || 0);
+      const periodDsNet = Math.max(0, periodDsCredit - periodDsDebit);
+      const periodSbPurchaseTotal = Number(periodSb.total || 0);
+
+      return {
+        _id: login._id || customer._id,
+        customerId: customer,
+        branchId: branch,
+        accountManagerId: customer.accountManagerId,
+        accountManager: staff ? {
+          _id: staff._id,
+          firstName: staff.firstName,
+          lastName: staff.lastName,
+          role: staff.role,
+          branchId: staff.branchId,
+        } : null,
+        count: Number(login.count || 0),
+        firstLogin: login.firstLogin || null,
+        lastLogin: login.lastLogin || null,
+        performance: {
+          last30Days: {
+            dsTotal: periodDsNet,
+            dsCreditTotal: periodDsCredit,
+            dsDebitTotal: periodDsDebit,
+            dsTransactionCount: Number(periodDs.transactions || 0),
+            sbPurchaseTotal: periodSbPurchaseTotal,
+            sbTransactionCount: Number(periodSb.transactions || 0),
+            combinedTotal: periodDsNet + periodSbPurchaseTotal,
+          },
+        },
+      };
+    });
+};
 
 const customerLogin = async (phone, password) => {
     try {
@@ -57,28 +342,14 @@ const customerLogin = async (phone, password) => {
 };
 const getCustomers = async () =>{
     try {
-        return await Login.find({}).populate({
-            path: 'branchId',
-            model: 'Branch',
-          })
-          .populate({
-            path: 'customerId',
-            model: 'Customer',
-          });
+        return await buildCustomerUsageReport({});
     } catch (error) {
         throw error;
     }
   }
 const getBranchCustomers = async (branchId) =>{
     try {
-        return await Login.find({branchId:branchId}).populate({
-            path: 'branchId',
-            model: 'Branch',
-          })
-          .populate({
-            path: 'customerId',
-            model: 'Customer',
-          });
+        return await buildCustomerUsageReport({ branchId });
     } catch (error) {
         throw error;
     }
@@ -86,14 +357,28 @@ const getBranchCustomers = async (branchId) =>{
 const getRepCustomers = async (repId) =>{
     
     try {
-        return await Login.find({accountManagerId:repId}).populate({
-            path: 'branchId',
-            model: 'Branch',
-          })
-          .populate({
-            path: 'customerId',
-            model: 'Customer',
-          });
+        return await buildCustomerUsageReport({ accountManagerId: repId });
+    } catch (error) {
+        throw error;
+    }
+  }
+const getNewCustomers = async () =>{
+    try {
+        return await buildNewCustomerReport({});
+    } catch (error) {
+        throw error;
+    }
+  }
+const getBranchNewCustomers = async (branchId) =>{
+    try {
+        return await buildNewCustomerReport({ branchId });
+    } catch (error) {
+        throw error;
+    }
+  }
+const getRepNewCustomers = async (repId) =>{
+    try {
+        return await buildNewCustomerReport({ accountManagerId: repId });
     } catch (error) {
         throw error;
     }
@@ -102,7 +387,7 @@ const getRepCustomers = async (repId) =>{
     try {
       // Update all non-admin users in a single atomic operation
       const result = await Staff.updateMany(
-        { role: { $ne: "Admin" } }, // Filter: role not equal to Admin
+        { role: { $ne: "Admin" }, loginDisabled: { $ne: true } },
         { 
           $inc: { tokenVersion: 1 }, // Invalidate all tokens
           $set: { loginDisabled: true } // Block new logins
@@ -126,7 +411,13 @@ const getRepCustomers = async (repId) =>{
 const unblockAllUsersService = async () => {
     try {
       const result = await Staff.updateMany(
-        {}, // All users
+        {
+          role: { $ne: "Admin" },
+          $or: [
+            { loginDisabled: true },
+            { tokenVersion: { $gt: 0 } }
+          ]
+        },
         { 
           $set: { 
             tokenVersion: 0,       // Reset token version
@@ -181,5 +472,8 @@ module.exports = {
     blockAllUsersService,
     unblockAllUsersService,
     getBranchCustomers,
-    getRepCustomers
+    getRepCustomers,
+    getNewCustomers,
+    getBranchNewCustomers,
+    getRepNewCustomers
 };

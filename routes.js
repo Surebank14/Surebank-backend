@@ -17,7 +17,16 @@ const mvrepDashboard = require('./src/components/Dashboard/ManagerViewRepDashboa
 const expenditureRoutes = require('./src/components/Expenditure/Routes/index');
 const smsRoutes = require('./src/components/SMS/Routes/index');
 const customerWithdrawalRequestRoutes = require('./src/components/CustomerWithdrawalRequest/Routes/index');
+const analyticsRoutes = require('./src/components/Analytics/Routes/index');
 
+// E-commerce routes
+const productRoutes = require('./src/components/Product/Routes/index');
+const productCategoryRoutes = require('./src/components/ProductCategory/Routes/index');
+const productReviewRoutes = require('./src/components/ProductReview/Routes/index');
+const cartRoutes = require('./src/components/Cart/Routes/index');
+const ecommerceOrderRoutes = require('./src/components/EcommerceOrder/Routes/index');
+const ecommerceAuthRoutes = require('./src/components/EcommerceAuth/Routes/index');
+const stockTransferRoutes = require('./src/components/StockTransfer/Routes/index');
 
 router.use('/api/branch', branchRoutes);
 router.use('/api/staff', staffRoutes);
@@ -35,6 +44,16 @@ router.use('/api/mvrepdashboard',mvrepDashboard);
 router.use('/api/expenditure', expenditureRoutes);
 router.use('/api/sms', smsRoutes);
 router.use('/api/customerwithdrawalrequest', customerWithdrawalRequestRoutes);
+router.use('/api/analytics', analyticsRoutes);
+
+// E-commerce API routes
+router.use('/api/products', productRoutes);
+router.use('/api/categories', productCategoryRoutes);
+router.use('/api/product-reviews', productReviewRoutes);
+router.use('/api/cart', cartRoutes);
+router.use('/api/ecommerce/orders', ecommerceOrderRoutes);
+router.use('/api/ecommerce/auth', ecommerceAuthRoutes);
+router.use('/api/stock-transfers', stockTransferRoutes);
 
 
 module.exports = router;

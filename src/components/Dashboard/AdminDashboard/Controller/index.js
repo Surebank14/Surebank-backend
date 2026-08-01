@@ -29,6 +29,33 @@ const bcrypt = require('bcrypt')
             res.status(500).json({ message: error.message });
         }
       }
+      const getDSAccountWithdrawalReport = async (req, res) => {
+        try {
+            const {date,branchId} = req.body
+            const report = await accountTransactionService.getDSAccountWithdrawalReport(date,branchId);
+            res.status(200).json(report);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+      const getAllFreeToWithdrawWithdrawal = async (req, res) => {
+        try {
+            const {date,branchId} = req.body
+            const withdrawal = await accountTransactionService.getAllFreeToWithdrawWithdrawal(date,branchId);
+            res.status(200).json(withdrawal);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+      const getFreeToWithdrawWithdrawalReport = async (req, res) => {
+        try {
+            const {date,branchId} = req.body
+            const report = await accountTransactionService.getFreeToWithdrawWithdrawalReport(date,branchId);
+            res.status(200).json(report);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
       const getAllDSAccountCharge = async (req, res) => {
         try {
             const DSAccount = await accountTransactionService.getAllDSAccountCharge();
@@ -301,11 +328,80 @@ const bcrypt = require('bcrypt')
         }
       }
       const getOrder = async (req, res) => {
-    // const createdBy = req.staff.staffId;
-
         try {
-            const order = await accountTransactionService.getOrder();
+            const { page, limit, search } = req.body || {};
+            const order = await accountTransactionService.getOrder({ page, limit, search });
             res.status(200).json(order);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceIncome = async (req, res) => {
+        const {date, branchId} = req.body;
+        try {
+            const ecommerceIncome = await accountTransactionService.getEcommerceIncome(date, branchId);
+            res.status(200).json(ecommerceIncome);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getDailyEcommerceIncome = async (req, res) => {
+        const {date, branchId} = req.body;
+        try {
+            const ecommerceIncome = await accountTransactionService.getDailyEcommerceIncome(date, branchId);
+            res.status(200).json(ecommerceIncome);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceIncomeReport = async (req, res) => {
+        const {date, branchId} = req.body;
+        try {
+            const report = await accountTransactionService.getEcommerceIncomeReport(date, branchId);
+            res.status(200).json(report);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceDeposit = async (req, res) => {
+        const { date, branchId } = req.body;
+        try {
+            const ecommerceDeposit = await accountTransactionService.getEcommerceDeposit(date, branchId);
+            res.status(200).json(ecommerceDeposit);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceDepositReport = async (req, res) => {
+        const { date, branchId } = req.body;
+        try {
+            const report = await accountTransactionService.getEcommerceDepositReport(date, branchId);
+            res.status(200).json(report);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceDSDeposit = async (req, res) => {
+        const { date, branchId } = req.body;
+        try {
+            const ecommerceDSDeposit = await accountTransactionService.getEcommerceDSDeposit(date, branchId);
+            res.status(200).json(ecommerceDSDeposit);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+
+      const getEcommerceDSDepositReport = async (req, res) => {
+        const { date, branchId } = req.body;
+        try {
+            const report = await accountTransactionService.getEcommerceDSDepositReport(date, branchId);
+            res.status(200).json(report);
         } catch (error) {
             res.status(500).json({ message: error.message });
         }
@@ -315,6 +411,9 @@ const bcrypt = require('bcrypt')
     getAllAvailableBalance,
     getAllDSAccount,
     getAllDSAccountWithdrawal,
+    getDSAccountWithdrawalReport,
+    getAllFreeToWithdrawWithdrawal,
+    getFreeToWithdrawWithdrawalReport,
     getAllDSAccountCharge,
     getAllSBAccount,
     getAllFDAccount,
@@ -346,4 +445,11 @@ const bcrypt = require('bcrypt')
     getExpenditureReport,
     getTransaction,
     getOrder,
+    getEcommerceIncome,
+    getDailyEcommerceIncome,
+    getEcommerceIncomeReport,
+    getEcommerceDeposit,
+    getEcommerceDepositReport,
+    getEcommerceDSDeposit,
+    getEcommerceDSDepositReport,
   };

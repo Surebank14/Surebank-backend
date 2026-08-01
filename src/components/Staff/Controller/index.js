@@ -73,11 +73,18 @@ const getBranchStaff = async (req, res) => {
      const updateStaff = async (req,res) => {
       const staff = req.params.id
       const status = req.query.status
+      const { role } = req.body || {};
           try {
-        const newData = await staffService.updateStaff({staff,status})
+            if (role && req.staff?.role !== 'Admin') {
+              return res.status(403).json({ message: 'Only admin can change staff role' });
+            }
+            if (role && !['Manager', 'ProductManager', 'Agent', 'OnlineRep'].includes(role)) {
+              return res.status(400).json({ message: 'Invalid staff role' });
+            }
+        const newData = await staffService.updateStaff({staff,status,role})
             res.status(201).json({ data: newData });
           } catch (error) {
-            return { success: false, message: 'An error occurred while updating', error };
+            return res.status(500).json({ message: error.message || 'An error occurred while updating' });
           }
         };
      const updateStaffPassword = async (req,res) => {
@@ -90,6 +97,19 @@ const getBranchStaff = async (req, res) => {
             return { success: false, message: 'An error occurred while updating', error };
           }
         };
+     const updateStaffSignature = async (req,res) => {
+      const staffId = req.params.id
+          try {
+        const newData = await staffService.updateStaffSignature({
+          staffId,
+          signatureUrl: req.body.signatureUrl,
+          uploadedBy: req.staff.staffId
+        })
+            res.status(200).json(newData);
+          } catch (error) {
+            return res.status(500).json({ message: error.message || 'An error occurred while updating signature' });
+          }
+        };
 
   module.exports = {
     registerStaff,
@@ -97,5 +117,6 @@ const getBranchStaff = async (req, res) => {
     getBranchStaff,
     updateStaff,
     resetStaffPassword,
-    updateStaffPassword
+    updateStaffPassword,
+    updateStaffSignature
   };

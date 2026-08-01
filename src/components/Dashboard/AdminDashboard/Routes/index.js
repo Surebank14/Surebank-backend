@@ -7,6 +7,9 @@ const {staffAuth} = require('../../../Middleware/index')
 router.post('/ds',staffAuth, AcountTransactionController.getAllDSAccount);
 router.post('/availablebalance',staffAuth, AcountTransactionController.getAllAvailableBalance);
 router.post('/dswithdrawal',staffAuth, AcountTransactionController.getAllDSAccountWithdrawal);
+router.post('/dswithdrawalreport',staffAuth, AcountTransactionController.getDSAccountWithdrawalReport);
+router.post('/fwwithdrawal',staffAuth, AcountTransactionController.getAllFreeToWithdrawWithdrawal);
+router.post('/fwwithdrawalreport',staffAuth, AcountTransactionController.getFreeToWithdrawWithdrawalReport);
 router.get('/dscharge',staffAuth, AcountTransactionController.getAllDSAccountCharge);
 router.post('/dailyds',staffAuth, AcountTransactionController.getAllDailyDSAccount);
 router.post('/dailyfd',staffAuth, AcountTransactionController.getAllDailyFDAccount);
@@ -38,6 +41,13 @@ router.post('/dsincomereport',staffAuth, AcountTransactionController.getDSIncome
 router.post('/expenditurereport',staffAuth, AcountTransactionController.getExpenditureReport);
 router.post('/transaction', staffAuth, AcountTransactionController.getTransaction);
 router.post('/order', staffAuth, AcountTransactionController.getOrder);
+router.post('/ecommerceincome', staffAuth, AcountTransactionController.getEcommerceIncome);
+router.post('/dailyecommerceincome', staffAuth, AcountTransactionController.getDailyEcommerceIncome);
+router.post('/ecommerceincomereport', staffAuth, AcountTransactionController.getEcommerceIncomeReport);
+router.post('/ecommercedeposit', staffAuth, AcountTransactionController.getEcommerceDeposit);
+router.post('/ecommercedepositreport', staffAuth, AcountTransactionController.getEcommerceDepositReport);
+router.post('/ecommercedsdeposit', staffAuth, AcountTransactionController.getEcommerceDSDeposit);
+router.post('/ecommercedsdepositreport', staffAuth, AcountTransactionController.getEcommerceDSDepositReport);
 
 
 module.exports = router;

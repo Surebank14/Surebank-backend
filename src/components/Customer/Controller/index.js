@@ -3,6 +3,8 @@ const accountService = require('../../Account/Service/index')
 require('dotenv').config()
 const bcrypt = require('bcrypt')
 
+const normalizePhoneNumber = (value = '') => String(value || '').replace(/\D/g, '');
+const isValidPhoneNumber = (value = '') => /^\d{11}$/.test(value);
 
     const registerCustomer = async (req, res) => {
         try {
@@ -11,8 +13,12 @@ const bcrypt = require('bcrypt')
         const salt = await bcrypt.genSalt()
         req.body.password = await bcrypt.hash(req.body.password,salt)
           const { firstName,lastName, phone, address, password,branchId,accountManagerId } = req.body;
-          const newCustomer = await customerService.createCustomer({ firstName,lastName, phone, address,createdBy,accountManagerId, password,branchId });
-          const accountNumber = await accountService.createAccount({customerId:newCustomer._id,staffId:staffId,branchId,accountManagerId,phone:phone})
+          const normalizedPhone = normalizePhoneNumber(phone);
+          if (!isValidPhoneNumber(normalizedPhone)) {
+            return res.status(400).json({ error: 'Phone number must be exactly 11 digits' });
+          }
+          const newCustomer = await customerService.createCustomer({ firstName,lastName, phone: normalizedPhone, address,createdBy,accountManagerId, password,branchId });
+          const accountNumber = await accountService.createAccount({customerId:newCustomer._id,staffId:staffId,branchId,accountManagerId,phone:normalizedPhone})
           res.status(201).json({ message: 'Customer registered successfully', user: newCustomer,accountNumber:accountNumber });
         } catch (error) {
           res.status(500).json({ error: error.message });
@@ -47,7 +53,16 @@ const bcrypt = require('bcrypt')
       };
       const getCustomer = async (req, res) => {
         try {
-            const customers = await customerService.getCustomers();
+            const { page, limit, search } = req.query;
+            const customers = await customerService.getCustomers({ page, limit, search });
+            res.status(200).json(customers);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+      }
+      const getEcommerceCustomers = async (req, res) => {
+        try {
+            const customers = await customerService.getEcommerceCustomers();
             res.status(200).json(customers);
         } catch (error) {
             res.status(500).json({ message: error.message });
@@ -114,12 +129,11 @@ const bcrypt = require('bcrypt')
               };
                  const updateCustomerPassword = async (req,res) => {
                     const customer = req.params.id
-                    const updatePassword = "true"
                         try {
-                      const newData = await customerService.updateCustomerPassword({customer,updatePassword})
+                      const newData = await customerService.updateCustomerPassword({customer})
                           res.status(201).json({ data: newData });
                         } catch (error) {
-                          return { success: false, message: 'An error occurred while updating', error };
+                          return res.status(500).json({ message: error.message || 'An error occurred while updating' });
                         }
                       };
 
@@ -127,6 +141,7 @@ const bcrypt = require('bcrypt')
     registerCustomer,
     resetCustomerPassword,
     getCustomer,
+    getEcommerceCustomers,
     getCustomerById,
     getCustomerByBranch,
     getCustomerByRep,

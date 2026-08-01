@@ -3,11 +3,52 @@ const  generateUniqueAccountNumber  = require('../../generateAccountNumber');
 const DSAccount = require('../Model/index');
 const AccountTransaction = require('../../AccountTransaction/Service/index');
 const SureBankAccount = require('../../SureBankAccount/Service/index')
+const Staff = require('../../Staff/Model');
+const SBAccount = require('../../SBAccount/Model');
+const Customer = require('../../Customer/Model');
+
+const normalizeSettlementBankDetails = (details = {}) => ({
+  bankName: String(details.bankName || '').trim(),
+  accountName: String(details.accountName || '').trim(),
+  bankAccountNumber: String(details.bankAccountNumber || '').trim(),
+});
+
+const hasSettlementBankDetails = (details = {}) => {
+  const normalized = normalizeSettlementBankDetails(details);
+  return Boolean(normalized.bankName && normalized.accountName && normalized.bankAccountNumber);
+};
+
+const saveCustomerSettlementBankDetails = async (customerId, details = {}) => {
+  const settlementBankDetails = normalizeSettlementBankDetails(details);
+  if (!hasSettlementBankDetails(settlementBankDetails)) {
+    throw new Error('Settlement bank details are required: Bank name, Account name and Account number');
+  }
+
+  await Customer.findByIdAndUpdate(customerId, {
+    $set: { settlementBankDetails },
+  });
+
+  return settlementBankDetails;
+};
 
 const createDSAccount = async (DSAccountData) => {
           const existingDSAccountNumber = await getAccountByAccountNumber(DSAccountData.accountNumber);
           if (!existingDSAccountNumber) {
             throw new Error('Account number does not exists');
+          }
+          const existingCustomerDSAccounts = await DSAccount.countDocuments({
+            customerId: existingDSAccountNumber.customerId,
+          });
+          const customer = await Customer.findById(existingDSAccountNumber.customerId);
+          if (!customer) {
+            throw new Error('Customer not found');
+          }
+          const incomingSettlementBankDetails = normalizeSettlementBankDetails(DSAccountData.settlementBankDetails || {});
+          const currentSettlementBankDetails = normalizeSettlementBankDetails(customer.settlementBankDetails || {});
+          if (hasSettlementBankDetails(incomingSettlementBankDetails)) {
+            await saveCustomerSettlementBankDetails(existingDSAccountNumber.customerId, incomingSettlementBankDetails);
+          } else if (existingCustomerDSAccounts === 0 && !hasSettlementBankDetails(currentSettlementBankDetails)) {
+            throw new Error('Settlement bank details are required for the first DS package');
           }
           const existingDSAccount = await DSAccount.findOne({
             accountNumber: DSAccountData.accountNumber,
@@ -17,7 +58,13 @@ const createDSAccount = async (DSAccountData) => {
             throw new Error(`Customer has an active ${DSAccountData.accountType} DS account running`);
           }
           const DSAccountNumber = await generateUniqueAccountNumber('DSA')
-  const dsaccount = new DSAccount({...DSAccountData,customerId:existingDSAccountNumber.customerId,branchId:existingDSAccountNumber.branchId,DSAccountNumber});
+  const dsaccount = new DSAccount({
+    ...DSAccountData,
+    accountManagerId: DSAccountData.accountManagerId || existingDSAccountNumber.accountManagerId || DSAccountData.createdBy,
+    customerId: existingDSAccountNumber.customerId,
+    branchId: existingDSAccountNumber.branchId,
+    DSAccountNumber
+  });
   const newDSAccount = await dsaccount.save();
   return ({message:"Account created successfilly", newDSAccount})
 };
@@ -55,8 +102,59 @@ const updateDSAccountAmount = async (details) => {
   // }
 };
 const getAccountByAccountNumber = async (accountNumber) => {
-    return await Account.findOne({ accountNumber });
+    return await Account.findOne({
+      accountNumber,
+      walletType: { $ne: 'sb_order_wallet' }
+    });
   };
+
+const getOrCreateSBOrderWallet = async ({ customerId, accountNumber, createdBy }) => {
+  let wallet = await Account.findOne({
+    customerId: customerId.toString(),
+    walletType: 'sb_order_wallet'
+  });
+
+  if (wallet) return wallet;
+
+  const sourceAccount = await getAccountByAccountNumber(accountNumber);
+  if (!sourceAccount) {
+    throw new Error('Free to withdraw account does not exist');
+  }
+
+  wallet = await Account.create({
+    customerId: sourceAccount.customerId,
+    accountNumber: sourceAccount.accountNumber,
+    walletType: 'sb_order_wallet',
+    availableBalance: 0,
+    ledgerBalance: 0,
+    createdBy: createdBy || sourceAccount.createdBy,
+    accountManagerId: sourceAccount.accountManagerId,
+    branchId: sourceAccount.branchId,
+    status: 'active',
+  });
+
+  return wallet;
+};
+
+const formatTransactionDate = (date = new Date()) => {
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+const getStaffDisplayName = async (staffId) => {
+  if (!staffId) return 'Staff';
+
+  const staff = await Staff.findById(staffId).select('firstName lastName').lean();
+  if (!staff) return 'Staff';
+
+  return `${staff.firstName} ${staff.lastName}`.trim();
+};
 
 const getDSAccounts = async () =>{
     try {
@@ -121,6 +219,8 @@ const getCustomerDSAccountById = async (customerId) =>{
   
     // Calculate the new total count
     const totalCount = dsaccount.totalCount + contributionDaysCount;
+    const depositNarration = contributionInput.narration || "DS Deposit";
+    const depositTransactionRef = contributionInput.transactionRef || undefined;
   
     if (totalCount > 31) {
       const circle = dsaccount.totalContribution + contributionInput.amountPerDay;
@@ -171,9 +271,11 @@ const getCustomerDSAccountById = async (customerId) =>{
         accountNumber: dsaccount.accountNumber,
         accountTypeId: DSAccountId,
         date: formattedDate,
-        narration: "DS Deposit",
+        narration: depositNarration,
         package:"DS",
         direction: "Credit",
+        transactionRef: depositTransactionRef,
+        excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
       });
     
       await AccountTransaction.DepositTransactionAccount({
@@ -232,6 +334,7 @@ const getCustomerDSAccountById = async (customerId) =>{
         narration: "DS Charge",
         package:"DS",
         direction: "Charge",
+        excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
       });
     
       const sureBankDeposit = {
@@ -275,9 +378,11 @@ const getCustomerDSAccountById = async (customerId) =>{
        accountNumber: dsaccount.accountNumber,
        accountTypeId: DSAccountId,
        date: formattedDate,
-       narration: "DS Deposit",
+       narration: depositNarration,
        package:"DS",
        direction: "Credit",
+       transactionRef: depositTransactionRef,
+       excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
      });
       const finalContribution = await AccountTransaction.DepositTransactionAccount({
         accountNumber: dsaccount.accountNumber,
@@ -343,9 +448,11 @@ const getCustomerDSAccountById = async (customerId) =>{
        accountNumber: dsaccount.accountNumber,
        accountTypeId: DSAccountId,
        date: formattedDate,
-       narration: "DS Deposit",
+       narration: depositNarration,
        package:"DS",
        direction: "Credit",
+       transactionRef: depositTransactionRef,
+       excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
      });
  
      // Log the charge as a new contribution
@@ -363,6 +470,7 @@ const getCustomerDSAccountById = async (customerId) =>{
        narration: "DS Charge",
        package:"DS",
        direction: "Charge",
+       excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
      });
      const newBalance = contributionInput.amountPerDay - chargeAmount
      const sureBankDeposit = {
@@ -461,9 +569,11 @@ const getCustomerDSAccountById = async (customerId) =>{
         accountNumber: dsaccount.accountNumber,
         accountTypeId: DSAccountId,
         date: formattedDate,
-        narration: "DS Deposit",
+        narration: depositNarration,
         package:"DS",
         direction: "Credit",
+        transactionRef: depositTransactionRef,
+        excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
       });
       // Update total contribution count
       await DSAccount.findByIdAndUpdate(DSAccountId, {
@@ -487,9 +597,11 @@ const getCustomerDSAccountById = async (customerId) =>{
         accountNumber: dsaccount.accountNumber,
         accountTypeId: DSAccountId,
         date: formattedDate,
-        narration: "DS Deposit",
+        narration: depositNarration,
         package:"DS",
         direction: "Credit",
+        transactionRef: depositTransactionRef,
+        excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
       });
   
       // Log the charge as a new contribution
@@ -507,6 +619,7 @@ const getCustomerDSAccountById = async (customerId) =>{
         narration: "DS Charge",
         package:"DS",
         direction: "Charge",
+        excludeFromStaffStats: contributionInput.excludeFromStaffStats === true,
       });
       const newBalance = contributionInput.amountPerDay - chargeAmount
       const sureBankDeposit = {
@@ -1092,6 +1205,224 @@ const freeToWithdrawReversal = async (contributionInput) => {
   
       return { newContribution };
     }
+
+  const mainDeposit = async (contributionInput) => {
+    const customerAccount = await getAccountByAccountNumber(contributionInput.accountNumber);
+    if (!customerAccount) {
+      throw new Error('Account number does not exist.');
+    }
+
+    const amount = Number(contributionInput.amountPerDay);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Please provide a valid amount');
+    }
+
+    const formattedDate = formatTransactionDate();
+    const account = await Account.findOne({ accountNumber: contributionInput.accountNumber });
+
+    if (!account) {
+      throw new Error('Account not found for deposit');
+    }
+
+    const staffName = await getStaffDisplayName(contributionInput.createdBy);
+
+    const newContribution = await AccountTransaction.DepositTransactionAccount({
+      createdBy: contributionInput.createdBy,
+      transactionOwnerId: contributionInput.createdBy,
+      amount,
+      balance: Number(account.availableBalance || 0) + amount,
+      branchId: account.branchId,
+      customerId: account.customerId,
+      accountManagerId: account.accountManagerId,
+      accountNumber: account.accountNumber,
+      accountTypeId: account._id,
+      date: formattedDate,
+      narration: `Deposited by ${staffName}`,
+      package: "Wallet",
+      direction: "Credit",
+    });
+
+    await Account.findOneAndUpdate(
+      { accountNumber: contributionInput.accountNumber },
+      {
+        $set: {
+          availableBalance: Number(account.availableBalance || 0) + amount,
+          ledgerBalance: Number(account.ledgerBalance || 0) + amount,
+        },
+      }
+    );
+
+    return { newContribution };
+  }
+
+  const transferWalletToPackageAccount = async (contributionInput) => {
+    const transferType = contributionInput.transferType || 'free_to_sb_wallet';
+    const sourceAccountNumber = contributionInput.accountNumber;
+    const targetAccountNumber = String(
+      contributionInput.targetAccountNumber
+      || contributionInput.SBAccountNumber
+      || contributionInput.DSAccountNumber
+      || ''
+    ).trim();
+    const amount = Number(contributionInput.amountPerDay);
+
+    if (!sourceAccountNumber) {
+      throw new Error('Wallet account number is required');
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Please provide a valid amount');
+    }
+
+    const account = await getAccountByAccountNumber(sourceAccountNumber);
+    if (!account) {
+      throw new Error('Wallet account does not exist');
+    }
+
+    if (transferType === 'free_to_sb_wallet' && amount > Number(account.availableBalance || 0)) {
+      throw new Error('Insufficient wallet balance');
+    }
+
+    const formattedDate = formatTransactionDate();
+
+    if (transferType === 'free_to_sb_wallet') {
+      const sbWallet = await getOrCreateSBOrderWallet({
+        customerId: account.customerId,
+        accountNumber: account.accountNumber,
+        createdBy: contributionInput.createdBy
+      });
+
+      const newFreeAvailableBalance = Number(account.availableBalance || 0) - amount;
+      const newFreeLedgerBalance = Number(account.ledgerBalance || 0) - amount;
+      const newSBWalletAvailableBalance = Number(sbWallet.availableBalance || 0) + amount;
+      const newSBWalletLedgerBalance = Number(sbWallet.ledgerBalance || 0) + amount;
+
+      const walletTransaction = await AccountTransaction.DepositTransactionAccount({
+        createdBy: contributionInput.createdBy,
+        transactionOwnerId: contributionInput.createdBy,
+        customerId: account.customerId,
+        amount,
+        balance: newFreeAvailableBalance,
+        branchId: account.branchId,
+        accountManagerId: account.accountManagerId,
+        accountNumber: account.accountNumber,
+        accountTypeId: account._id,
+        date: formattedDate,
+        narration: 'Transferred from Free To Withdraw to SB Order Wallet',
+        package: 'Wallet',
+        direction: 'Debit',
+        excludeFromStaffStats: true,
+      });
+
+      const sbWalletTransaction = await AccountTransaction.DepositTransactionAccount({
+        createdBy: contributionInput.createdBy,
+        transactionOwnerId: contributionInput.createdBy,
+        customerId: sbWallet.customerId,
+        amount,
+        balance: newSBWalletAvailableBalance,
+        branchId: sbWallet.branchId || account.branchId,
+        accountManagerId: sbWallet.accountManagerId || account.accountManagerId,
+        accountNumber: sbWallet.accountNumber,
+        accountTypeId: sbWallet._id,
+        date: formattedDate,
+        narration: 'Transferred to SB Order Wallet from Free To Withdraw',
+        package: 'SB_ORDER_WALLET',
+        direction: 'Credit',
+        excludeFromStaffStats: true,
+      });
+
+      await Account.findByIdAndUpdate(account._id, {
+        $set: {
+          availableBalance: newFreeAvailableBalance,
+          ledgerBalance: newFreeLedgerBalance,
+        },
+      });
+
+      await Account.findByIdAndUpdate(sbWallet._id, {
+        $set: {
+          availableBalance: newSBWalletAvailableBalance,
+          ledgerBalance: newSBWalletLedgerBalance,
+        },
+      });
+
+      return {
+        walletTransaction,
+        targetTransaction: sbWalletTransaction,
+        targetType: 'SB_ORDER_WALLET',
+      };
+    }
+
+    if (transferType === 'sb_wallet_to_ds') {
+      if (!targetAccountNumber) {
+        throw new Error('Target DS account is required');
+      }
+
+      const sbWallet = await Account.findOne({
+        customerId: account.customerId.toString(),
+        walletType: 'sb_order_wallet'
+      });
+
+      if (!sbWallet) {
+        throw new Error('SB Order Wallet does not exist');
+      }
+      if (amount > Number(sbWallet.availableBalance || 0)) {
+        throw new Error('Insufficient SB Order Wallet balance');
+      }
+
+      const dsAccount = await DSAccount.findOne({ DSAccountNumber: targetAccountNumber });
+      if (!dsAccount) {
+        throw new Error('Target DS account does not exist');
+      }
+      if (String(dsAccount.customerId) !== String(account.customerId)) {
+        throw new Error('The selected DS account does not belong to this customer');
+      }
+
+      const newSBWalletAvailableBalance = Number(sbWallet.availableBalance || 0) - amount;
+      const newSBWalletLedgerBalance = Number(sbWallet.ledgerBalance || 0) - amount;
+      const walletTransaction = await AccountTransaction.DepositTransactionAccount({
+        createdBy: contributionInput.createdBy,
+        transactionOwnerId: contributionInput.createdBy,
+        customerId: sbWallet.customerId,
+        amount,
+        balance: newSBWalletAvailableBalance,
+        branchId: sbWallet.branchId,
+        accountManagerId: sbWallet.accountManagerId,
+        accountNumber: sbWallet.accountNumber,
+        accountTypeId: sbWallet._id,
+        date: formattedDate,
+        narration: `Transferred from SB Order Wallet to DS account ${targetAccountNumber}`,
+        package: 'SB_ORDER_WALLET',
+        direction: "Debit",
+        excludeFromStaffStats: true,
+      });
+
+      await Account.findByIdAndUpdate(
+        sbWallet._id,
+        {
+          $set: {
+            availableBalance: newSBWalletAvailableBalance,
+            ledgerBalance: newSBWalletLedgerBalance,
+          },
+        }
+      );
+
+      const dsContribution = await saveDailyContribution({
+        DSAccountNumber: targetAccountNumber,
+        accountType: dsAccount.accountType,
+        amountPerDay: amount,
+        createdBy: contributionInput.createdBy,
+        excludeFromStaffStats: true,
+      });
+
+      return {
+        walletTransaction,
+        targetTransaction: dsContribution?.data || dsContribution,
+        targetType: 'DS',
+      };
+    }
+
+    throw new Error('Unsupported wallet transfer type');
+  }
  
 
   
@@ -1111,5 +1442,7 @@ const freeToWithdrawReversal = async (contributionInput) => {
     reverseDailyContribution,
     reverseDailyContributionCharge,
     freeToWithdrawReversal,
-    mainWithdrawal
+    mainWithdrawal,
+    mainDeposit,
+    transferWalletToPackageAccount
   };

@@ -1,20 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const customerController = require('../Controller/index');
-const {staffAuth} = require('../../Middleware/index')
+const {staffAuth, adminOnly} = require('../../Middleware/index')
 const {customerAuth} = require('../../Middleware/index')
 
 
 router.post('/', staffAuth, customerController.registerCustomer);
 router.get('/branchcustomer', staffAuth, customerController.getCustomerByBranch);
 router.get('/repcustomer', staffAuth, customerController.getCustomerByRep);
+router.get('/ecommerce', staffAuth, customerController.getEcommerceCustomers);
 router.get('/', staffAuth,customerController.getCustomer);
 router.get('/:id',staffAuth, customerController.getCustomerById);
 router.get('/customer/:id',customerAuth, customerController.getCustomerById);
 router.put('/forgotpassword',customerController.resetCustomerPassword);
 router.put('/:id', staffAuth,customerController.transferAllCustomer);
 router.put('/updatephone/:id', staffAuth,customerController.updateCustomerPhoneNumber);
-router.put('/password/:id',staffAuth,customerController.updateCustomerPassword);
+router.put('/password/:id',staffAuth,adminOnly,customerController.updateCustomerPassword);
 router.put('/newstaff/:id',staffAuth, customerController.transferCustomer);
 
 

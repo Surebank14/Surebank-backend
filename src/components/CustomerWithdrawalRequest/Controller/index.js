@@ -41,7 +41,24 @@ const withdrawalRequest = async (req, res) => {
 
     res.status(201).json({ message: 'Withdrawal request sent successfully', withdrawalRequest: withdrawalRequest });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(400).json({ message: error.message });
+  }
+};
+
+const staffWithdrawalRequest = async (req, res) => {
+  try {
+    if (!['Agent', 'Rep', 'OnlineRep'].includes(req.staff?.role)) {
+      return res.status(403).json({ message: 'Rep access required' });
+    }
+
+    const withdrawalRequest = await CustomerWithdrawalRequest.createStaffCustomerWithdrawalRequest(req.body, req.staff);
+
+    res.status(201).json({
+      message: 'Withdrawal request sent successfully',
+      withdrawalRequest,
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
   }
 };
 
@@ -82,9 +99,10 @@ const withdrawalRequest = async (req, res) => {
       }
      const updateCustomerWithdrawalRequestStatus = async (req,res) => {
         const withdrawalRequestId = req.params.id
+        const adminId = req.staff.staffId
         try {
       
-      const newStatus = await CustomerWithdrawalRequest.updateCustomerWithdrawalRequestStatus({withdrawalRequestId})
+      const newStatus = await CustomerWithdrawalRequest.updateCustomerWithdrawalRequestStatus({withdrawalRequestId, adminId, staff: req.staff})
           res.status(201).json({ data: newStatus });
         } catch (error) {
           res.status(500).json({ message: error.message });
@@ -93,6 +111,7 @@ const withdrawalRequest = async (req, res) => {
 
   module.exports = {
     withdrawalRequest,
+    staffWithdrawalRequest,
     getCustomersWithdrawalRequest,
     updateCustomerWithdrawalRequestStatus,
     getBranchCustomersWithdrawalRequest,

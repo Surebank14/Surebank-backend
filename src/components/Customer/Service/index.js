@@ -1,5 +1,7 @@
 const Account = require('../../Account/Model');
 const AccountTransaction = require('../../AccountTransaction/Model');
+const Branch = require('../../Branch/Model');
+const bcrypt = require('bcrypt');
 const DSAccount = require('../../DSAccount/Model');
 const FDAccount = require('../../FDAccount/Model');
 const SBAccount = require('../../SBAccount/Model');
@@ -7,6 +9,11 @@ const Staff = require('../../Staff/Model');
 const Customer = require('../Model/index');
 
 const createCustomer = async (customerData) => {
+     const normalizedPhone = String(customerData.phone || '').replace(/\D/g, '');
+            if (!/^\d{11}$/.test(normalizedPhone)) {
+            throw new Error('Phone number must be exactly 11 digits');
+            }
+            customerData.phone = normalizedPhone;
 
      const existingPhone = await getCustomerByPhone(customerData.phone);
             if (existingPhone) {
@@ -40,9 +47,57 @@ const getCustomerByPhone = async (phone) => {
     return await Customer.findOne({ phone });
   };
 
-const getCustomers = async () =>{
+const getCustomers = async ({ page = 1, limit = 25, search = '' } = {}) =>{
     try {
-        return await Customer.find({});
+        const safePage = Math.max(parseInt(page, 10) || 1, 1);
+        const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 100);
+        const trimmedSearch = search.trim();
+        const query = {};
+
+        if (trimmedSearch) {
+          const regex = new RegExp(trimmedSearch, 'i');
+          const matchingBranches = await Branch.find(
+            { name: { $regex: regex } },
+            { _id: 1 }
+          ).lean();
+
+          const branchIds = matchingBranches.map((branch) => branch._id.toString());
+
+          query.$or = [
+            { firstName: { $regex: regex } },
+            { lastName: { $regex: regex } },
+            { phone: { $regex: regex } },
+          ];
+
+          if (branchIds.length > 0) {
+            query.$or.push({ branchId: { $in: branchIds } });
+          }
+        }
+
+        const [items, total] = await Promise.all([
+          Customer.find(query)
+            .select('_id firstName lastName address phone email branchId updatePassword')
+            .sort({ firstName: 1, lastName: 1, createdAt: -1 })
+            .skip((safePage - 1) * safeLimit)
+            .limit(safeLimit)
+            .lean(),
+          Customer.countDocuments(query),
+        ]);
+
+        return {
+          items,
+          total,
+          page: safePage,
+          limit: safeLimit,
+          totalPages: Math.max(Math.ceil(total / safeLimit), 1),
+        };
+    } catch (error) {
+        throw error;
+    }
+  }
+const getEcommerceCustomers = async () =>{
+    try {
+        return await Customer.find({ createdBy: 'ECOMMERCE_SYSTEM' });
     } catch (error) {
         throw error;
     }
@@ -235,22 +290,31 @@ const getCustomerById = async (customerId) =>{
   };
   const updateCustomerPassword = async (details) => {
     try {
-      const { customer, updatePassword } = details;
+      const { customer } = details;
+      const existingCustomer = await Customer.findById(customer);
+      if (!existingCustomer) {
+        throw new Error("Customer not found or update failed");
+      }
+      const password = await bcrypt.hash(existingCustomer.phone, await bcrypt.genSalt());
   
       const updatedCustomer = await Customer.findOneAndUpdate(
         { _id: customer },
-        { $set: { updatePassword } },
+        { $set: { password, updatePassword: 'true' } },
         { new: true }
-      );
+      ).select('-password');
   
       if (!updatedCustomer) {
-        throw new Error("Staff not found or update failed");
+        throw new Error("Customer not found or update failed");
       }
   
-      return { success: true, message: "Updated successfully", updatedCustomer };
+      return {
+        success: true,
+        message: "Customer password reset. Temporary password is the customer's phone number.",
+        updatedCustomer,
+      };
     } catch (error) {
-      console.error("Error updating staff:", error);
-      throw new Error("An error occurred while updating the staff status.");
+      console.error("Error resetting customer password:", error);
+      throw new Error(error.message || "An error occurred while resetting the customer password.");
     }
   };
   
@@ -259,6 +323,7 @@ const getCustomerById = async (customerId) =>{
   module.exports = {
     createCustomer,
     getCustomers,
+    getEcommerceCustomers,
     getCustomerById,
     getCustomerByPhone,
     getCustomerByBranch,
