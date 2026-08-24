@@ -385,6 +385,7 @@ const getRepNewCustomers = async (repId) =>{
   }
   const blockAllUsersService = async () => {
     try {
+      // Update all non-admin users in a single atomic operation
       const result = await Staff.updateMany(
         { role: { $ne: "Admin" }, loginDisabled: { $ne: true } },
         { 
