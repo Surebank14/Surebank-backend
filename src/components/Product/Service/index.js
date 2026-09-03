@@ -40,6 +40,8 @@ const normalizePage = (value) => {
   return page;
 };
 
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const assertCostNotAbovePrice = (costPrice, price, label = 'Product') => {
   const nextCostPrice = normalizeNumber(costPrice);
   const nextPrice = normalizeNumber(price);
@@ -485,11 +487,9 @@ const getAllProducts = async (filters = {}) => {
     query.price = { ...query.price, $lte: filters.maxPrice };
   }
 
-  if (filters.search) {
-    query.$or = [
-      { name: { $regex: filters.search, $options: 'i' } },
-      { description: { $regex: filters.search, $options: 'i' } }
-    ];
+  const searchText = String(filters.search || '').trim();
+  if (searchText) {
+    query.name = { $regex: escapeRegex(searchText), $options: 'i' };
   }
 
   const page = filters.page ? normalizePage(filters.page) : null;
@@ -656,7 +656,16 @@ const updateProductStock = async (productId, quantity, operation = 'decrease', v
 };
 
 const getFeaturedProducts = async (limit = 8) => {
-  const products = await Product.find({ isActive: true })
+  const products = await Product.find({
+    isActive: true,
+    images: {
+      $elemMatch: {
+        $type: 'string',
+        $ne: '',
+        $not: /^\/uploads\//i
+      }
+    }
+  })
     .sort({ createdAt: -1 })
     .limit(normalizeLimit(limit, 8))
     .lean();
