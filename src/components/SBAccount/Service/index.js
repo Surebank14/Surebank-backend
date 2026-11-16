@@ -948,13 +948,14 @@ const updateSBAccountAmount = async (details) => {
         SBAccountNumber: SBAccountNumber,
         // productName: productName,
       });
-      if (sbaccount.costPrice !== 0) {
+      if (!sbaccount) throw new Error("SBAccount not found");
+      if (!isLegacySBAccount(sbaccount) && sbaccount.costPrice !== 0) {
         throw new Error("This selling price has been approved");
       }
       // Find and update the DSAccount by DSAccount
       const updatedSBAccount = await SBAccount.findOneAndUpdate(
         { SBAccountNumber }, // Find the account by accountNumber
-        { $set: { sellingPrice: sellingPrice, editedBy:editedBy, productName:productName,status:'booked' } }, // Update only the amount field
+        { $set: { sellingPrice: sellingPrice, editedBy:editedBy, productName:productName,status:'booked', ...(isLegacySBAccount(sbaccount) ? { costPrice: 0, profit: 0 } : {}) } }, // Update only the amount field
         { new: true } // Return the updated document
       );
   
@@ -1530,17 +1531,13 @@ const getAccountByAccountNumber = async (accountNumber) => {
         if (contributionInput.requesterRole !== 'Admin') {
           throw new Error('Only admin can sell legacy SB packages');
         }
-        if (!Number(sbaccount.costPrice || 0)) {
-          await hydrateSBAccountCostFromProducts(sbaccount, contributionInput.createdBy);
-          await sbaccount.save();
-        }
         const session = await mongoose.startSession();
         let result;
         try {
           await session.withTransaction(async () => {
             const legacy = await SBAccount.findById(sbaccount._id).session(session);
-            if (!legacy || String(legacy.status).toLowerCase() === 'sold') {
-              throw new Error('This SB package has already been sold');
+            if (!legacy) {
+              throw new Error('SB package not found');
             }
             const price = Number(legacy.sellingPrice || 0);
             const cost = Number(legacy.costPrice || 0);
@@ -1557,16 +1554,9 @@ const getAccountByAccountNumber = async (accountNumber) => {
               customerId: legacy.customerId, branchId: legacy.branchId, accountManagerId: legacy.accountManagerId,
               date, accountNumber: legacy.accountNumber, accountTypeId: legacy._id, package: 'SB' };
             const records = [{ ...audit, amount: price, balance: excess, direction: 'Purchased', narration: `${legacy.productName} sold` }];
-            if (excess > 0) {
-              records.push({ ...audit, amount: excess, balance: 0, direction: 'Moved', excludeFromStaffStats: true,
-                narration: 'Excess legacy SB balance moved to Free To Withdraw' });
-              records.push({ ...audit, accountNumber: wallet.accountNumber, accountTypeId: wallet._id,
-                package: 'Wallet', amount: excess, balance: Number(wallet.availableBalance || 0) + excess,
-                direction: 'Transfer', excludeFromStaffStats: true, narration: `Excess from SB package ${legacy.SBAccountNumber}` });
-            }
             const transactions = await AccountTransactionModel.create(records, { session, ordered: true });
             await Account.updateOne({ _id: wallet._id }, {
-              $inc: { availableBalance: excess, ledgerBalance: -price }
+              $inc: { ledgerBalance: -price }
             }, { session });
             await require('../../SureBankAccount/Model').create([{ package: 'SB', date, direction: 'Credit',
               narration: `Profit on ${legacy.productName}`, branchId: legacy.branchId, amount: price - cost,
@@ -1578,11 +1568,14 @@ const getAccountByAccountNumber = async (accountNumber) => {
               accountManagerId: legacy.accountManagerId, branchId: legacy.branchId, status: 'Sold',
               startDate: legacy.startDate, sellingPrice: price, costPrice: cost, balance: 0, profit: price - cost, items: []
             }], { session, ordered: true });
-            legacy.balance = 0;
-            legacy.status = 'sold';
+            legacy.balance = excess;
+            legacy.status = excess > 0 ? 'booked' : 'sold';
+            // Each subsequent sale needs a fresh cost approval.
+            legacy.costPrice = 0;
+            legacy.profit = 0;
             legacy.editedBy = contributionInput.createdBy;
             await legacy.save({ session });
-            result = { data: transactions[0], message: 'Product sold successfully; excess moved to Free To Withdraw' };
+            result = { data: transactions[0], message: 'Product sold successfully; remaining balance retained in SB package' };
           });
           return result;
         } finally {
