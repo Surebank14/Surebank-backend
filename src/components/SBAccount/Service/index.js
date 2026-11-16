@@ -1524,102 +1524,71 @@ const getAccountByAccountNumber = async (accountNumber) => {
           });
         }
 	      
-	        const SBAccountId = sbaccount._id;
-        const currentDate = new Date();
-        const formattedDate = currentDate.toLocaleString("en-GB", {
-          day: "2-digit",
-          month: "short",
-          year: "2-digit", // Abbreviated year (YY)
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true, // Ensures AM/PM format
-        });
-      
-        if (sbaccount.sellingPrice > sbaccount.balance) {
-          throw new Error("Insuffitient amount for product price");
+        if (Array.isArray(sbaccount.items) && sbaccount.items.length > 0) {
+          throw new Error('Use the item delivery action for this package');
         }
-        if (Number(sbaccount.costPrice || 0) === 0) {
+        if (contributionInput.requesterRole !== 'Admin') {
+          throw new Error('Only admin can sell legacy SB packages');
+        }
+        if (!Number(sbaccount.costPrice || 0)) {
           await hydrateSBAccountCostFromProducts(sbaccount, contributionInput.createdBy);
+          await sbaccount.save();
         }
-        if (Number(sbaccount.costPrice || 0) === 0) {
-          throw new Error("Ask admin for approval");
-        }
-
-        const account = await Account.findOne({ accountNumber: sbaccount.accountNumber });
-      
-        if (!account) {
-          throw new Error('Account not found for ledger update');
-        }
-        const newBalance = sbaccount.balance - sbaccount.sellingPrice;
-      
-          const newContribution = await AccountTransaction.DepositTransactionAccount({
-            createdBy: contributionInput.createdBy,
-            transactionOwnerId: contributionInput.createdBy,
-            customerId:sbaccount.customerId,
-            amount: sbaccount.sellingPrice,
-            balance: newBalance,
-            branchId: sbaccount.branchId,
-            accountManagerId: sbaccount.accountManagerId,
-            accountNumber: sbaccount.accountNumber,
-            accountTypeId: SBAccountId,
-            date: formattedDate,
-            package: "SB",
-            narration: `${sbaccount.productName} sold`,
-            direction: "Purchased",
-          });
-
-             const sureBankDeposit = {
-                  package:"SB",
-                  date: formattedDate,
-                  direction: "Credit",
-                  narration: `Profit on ${sbaccount.productName}`,
-                  branchId: sbaccount.branchId,
-                  amount: sbaccount.profit,
-                  customerId:sbaccount.customerId,
-                  type:SBAccountId
-                }
-          
-                await SureBankAccount.DepositTransactionAccount({...sureBankDeposit});
-      
-          await Account.findOneAndUpdate(
-            { accountNumber: sbaccount.accountNumber },
-            {
-              $set: {
-                ledgerBalance: account.ledgerBalance - sbaccount.sellingPrice,
-              },
+        const session = await mongoose.startSession();
+        let result;
+        try {
+          await session.withTransaction(async () => {
+            const legacy = await SBAccount.findById(sbaccount._id).session(session);
+            if (!legacy || String(legacy.status).toLowerCase() === 'sold') {
+              throw new Error('This SB package has already been sold');
             }
-          );
-      
-          await SBAccount.findByIdAndUpdate(SBAccountId, {
-            balance: newBalance,
-            // status: 'sold',
-            costPrice:0
+            const price = Number(legacy.sellingPrice || 0);
+            const cost = Number(legacy.costPrice || 0);
+            if (price <= 0 || Number(legacy.balance || 0) < price) throw new Error('Insufficient amount for product price');
+            if (cost <= 0) throw new Error('Ask admin for approval');
+            if (cost > price) throw new Error('Cost price cannot exceed selling price');
+            const wallet = await Account.findOne({ customerId: legacy.customerId,
+              $or: [{ walletType: 'free_to_withdraw' }, { walletType: { $exists: false } }]
+            }).session(session);
+            if (!wallet) throw new Error('Customer Free To Withdraw wallet not found');
+            const excess = Number(legacy.balance) - price;
+            const date = new Date().toISOString();
+            const audit = { createdBy: contributionInput.createdBy, transactionOwnerId: contributionInput.createdBy,
+              customerId: legacy.customerId, branchId: legacy.branchId, accountManagerId: legacy.accountManagerId,
+              date, accountNumber: legacy.accountNumber, accountTypeId: legacy._id, package: 'SB' };
+            const records = [{ ...audit, amount: price, balance: excess, direction: 'Purchased', narration: `${legacy.productName} sold` }];
+            if (excess > 0) {
+              records.push({ ...audit, amount: excess, balance: 0, direction: 'Moved', excludeFromStaffStats: true,
+                narration: 'Excess legacy SB balance moved to Free To Withdraw' });
+              records.push({ ...audit, accountNumber: wallet.accountNumber, accountTypeId: wallet._id,
+                package: 'Wallet', amount: excess, balance: Number(wallet.availableBalance || 0) + excess,
+                direction: 'Transfer', excludeFromStaffStats: true, narration: `Excess from SB package ${legacy.SBAccountNumber}` });
+            }
+            const transactions = await AccountTransactionModel.create(records, { session, ordered: true });
+            await Account.updateOne({ _id: wallet._id }, {
+              $inc: { availableBalance: excess, ledgerBalance: -price }
+            }, { session });
+            await require('../../SureBankAccount/Model').create([{ package: 'SB', date, direction: 'Credit',
+              narration: `Profit on ${legacy.productName}`, branchId: legacy.branchId, amount: price - cost,
+              customerId: legacy.customerId, type: legacy._id }], { session, ordered: true });
+            await Order.create([{ customerId: legacy.customerId, accountNumber: legacy.accountNumber,
+              SBAccountNumber: legacy.SBAccountNumber, createdBy: contributionInput.createdBy,
+              transactionOwnerId: contributionInput.createdBy, productName: legacy.productName,
+              productDescription: legacy.productDescription, editedBy: contributionInput.createdBy,
+              accountManagerId: legacy.accountManagerId, branchId: legacy.branchId, status: 'Sold',
+              startDate: legacy.startDate, sellingPrice: price, costPrice: cost, balance: 0, profit: price - cost, items: []
+            }], { session, ordered: true });
+            legacy.balance = 0;
+            legacy.status = 'sold';
+            legacy.editedBy = contributionInput.createdBy;
+            await legacy.save({ session });
+            result = { data: transactions[0], message: 'Product sold successfully; excess moved to Free To Withdraw' };
           });
-      
-           const order = new Order({
-        customerId: sbaccount.customerId,
-        accountNumber: sbaccount.accountNumber,
-        SBAccountNumber: sbaccount.SBAccountNumber,
-        createdBy: sbaccount.createdBy,
-        transactionOwnerId: sbaccount.createdBy,
-        productName: sbaccount.productName,
-        productDescription: sbaccount.productDescription,
-        editedBy: sbaccount.editedBy,
-        accountManagerId: sbaccount.accountManagerId,
-        branchId: sbaccount.branchId,
-        status: "Sold",
-        startDate: sbaccount.startDate,
-        sellingPrice: sbaccount.sellingPrice,
-        costPrice: 0,
-        balance: 0,
-        profit: 0, 
-        items: sbaccount.items || [],
-      });
-      const newOrder = await order.save();
-          
-      
-          return { data: newContribution, message: "Product sold successful" };
+          return result;
+        } finally {
+          await session.endSession();
         }
+    };
 
     const markSBAccountItemDelivered = async ({ SBAccountNumber, itemId, createdBy }) => {
       const sbaccount = await SBAccount.findOne({ SBAccountNumber });

@@ -143,7 +143,7 @@ const formatSBAccountResponse = (data, requesterRole) => {
         const contributionInput = req.body;
         const createdBy = req.staff.staffId;
         // const packageId = req.query;
-        const result = await SBAccountService.sellProduct({ ...contributionInput, createdBy});
+        const result = await SBAccountService.sellProduct({ ...contributionInput, createdBy, requesterRole: req.staff.role});
         res.status(200).json({data:result.data,message:result.message});
       }catch(error){
         res.status(500).json({ message: error.message });
