@@ -1014,7 +1014,7 @@ async function getAllDailySBAccountWithdrawalByDate(date = null, branchId = null
 async function getSBAccountIncome(date = null, branchId = null) {
     const query = {
       package: 'SB',
-      direction: 'Credit',
+      direction: { $in: ['Credit', 'Debit'] },
       createdAt: buildCumulativeCreatedAtQuery(date),
     };
   
@@ -1024,7 +1024,7 @@ async function getSBAccountIncome(date = null, branchId = null) {
   
     const transactions = await SureBankAccount.find(query);
   
-    const totalBalance = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+    const totalBalance = transactions.reduce((sum, tx) => sum + (tx.direction === 'Debit' ? -Number(tx.amount || 0) : Number(tx.amount || 0)), 0);
   
     return totalBalance;
   }

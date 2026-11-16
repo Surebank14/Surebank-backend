@@ -18,6 +18,14 @@ router.put('/:SBAccountNumber/items/:itemId/costprice', staffAuth, adminOnly, SB
 router.put('/:SBAccountNumber/items/:itemId/selling-price', staffAuth, adminOnly, SBAccountController.updateItemSellingPrice);
 router.post('/:SBAccountNumber/items/:itemId/mark-delivered', staffAuth, SBAccountController.markItemDelivered);
 router.post('/:SBAccountNumber/items/:itemId/customer-request', staffAuth, SBAccountController.requestItemFromWallet);
+router.get('/legacy/:number/sales', staffAuth, adminOnly, async (req, res) => {
+  try { res.json(await require('../Service/legacySaleReversal').list(req.params.number)); }
+  catch (error) { res.status(400).json({ message: error.message }); }
+});
+router.post('/legacy/sales/:saleId/reverse', staffAuth, adminOnly, async (req, res) => {
+  try { res.json(await require('../Service/legacySaleReversal').reverse(req.params.saleId, req.staff.staffId, req.body.reason)); }
+  catch (error) { res.status(400).json({ message: error.message }); }
+});
 router.get('/:id',staffAuth, SBAccountController.getCustomerSBAccountById);
 router.get('/customer/:id',customerAuth, SBAccountController.getCustomerSBAccountById);
 router.post('/deposit', staffAuth, SBAccountController.saveSBContribution);
