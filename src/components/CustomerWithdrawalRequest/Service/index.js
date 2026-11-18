@@ -251,6 +251,10 @@ const createStaffCustomerWithdrawalRequest = async (withdrawalData, staff = {}) 
             const wallet = await Account.findOne({
                 customerId: dsaccount.customerId,
                 walletType: 'free_to_withdraw',
+            }).session(session) || await Account.findOne({
+                customerId: dsaccount.customerId,
+                accountNumber: currentDS.accountNumber,
+                walletType: { $exists: false },
             }).session(session);
             if (!wallet) throw new Error('Customer Free To Withdraw wallet not found');
             const nextBalance = Number(wallet.availableBalance || 0) + contribution;
