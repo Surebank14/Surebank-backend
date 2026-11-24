@@ -1,3 +1,6 @@
+const mongoose = require('mongoose');
+const Staff = require('../../Staff/Model/index');
+const StockHistory = require('../Model/stockHistory');
 const Product = require('../Model/index');
 const ProductCategory = require('../../ProductCategory/Model/index');
 const EcommerceOrder = require('../../EcommerceOrder/Model/index');
@@ -275,13 +278,13 @@ const applyBranchStockToProducts = async (products) => {
   ));
 };
 
-const recalculateProductStock = async (productId) => {
-  const product = await Product.findById(productId);
+const recalculateProductStock = async (productId, session = null) => {
+  const product = await Product.findById(productId).session(session);
   if (!product) {
     throw new Error('Product not found');
   }
 
-  const stockRows = await ProductBranchStock.find({ productId: productId.toString() }).lean();
+  const stockRows = await ProductBranchStock.find({ productId: productId.toString() }).session(session).lean();
   product.stock = stockRows.reduce((total, row) => total + Number(row.quantity || 0), 0);
 
   if (product.hasVariations && Array.isArray(product.variations)) {
@@ -293,7 +296,7 @@ const recalculateProductStock = async (productId) => {
     });
   }
 
-  await product.save();
+  await product.save({ session });
   return product;
 };
 
@@ -588,74 +591,87 @@ const deleteProduct = async (productId) => {
   return { message: 'Product deleted successfully' };
 };
 
-const updateProductStock = async (productId, quantity, operation = 'decrease', variationId = '', branchId = '', staffId = '') => {
-  const product = await Product.findById(productId);
-  if (!product) {
-    throw new Error('Product not found');
-  }
-  if (!branchId) {
-    throw new Error('Branch is required for product stock update');
-  }
+const updateBranchStock = async (productId, branchId, staffId, items, reason = 'Manual adjustment') => {
+  if (!branchId) throw new Error('Branch is required for product stock update');
+  if (!Array.isArray(items) || !items.length) throw new Error('At least one stock quantity is required');
 
-  if (variationId) {
-    const variation = product.variations.id(variationId);
-    if (!variation) {
-      throw new Error('Product variation not found');
-    }
-  }
+  return mongoose.connection.transaction(async (session) => {
+    const product = await Product.findById(productId).session(session);
+    if (!product) throw new Error('Product not found');
 
-  const normalizedQuantity = normalizeNumber(quantity);
-  const normalizedVariationId = variationId || '';
-  const stockQuery = {
-    productId: productId.toString(),
-    branchId: branchId.toString(),
-    variationId: normalizedVariationId
-  };
-
-  if (operation === 'decrease') {
-    const updatedStock = await ProductBranchStock.findOneAndUpdate(
-      {
-        ...stockQuery,
-        quantity: { $gte: normalizedQuantity }
-      },
-      {
-        $inc: { quantity: -normalizedQuantity },
-        $set: { updatedBy: staffId || '' }
-      },
-      { new: true }
-    );
-
-    if (!updatedStock) {
-      const currentStock = await ProductBranchStock.findOne(stockQuery).lean();
-      const availableQuantity = Number(currentStock?.quantity || 0);
-      const variationLabel = normalizedVariationId ? ' for the selected variation' : '';
-      throw new Error(
-        `Insufficient branch stock${variationLabel}. Available: ${availableQuantity}, Required: ${normalizedQuantity}`
-      );
-    }
-
-    return await recalculateProductStock(productId);
-  }
-
-  const existingStock = await ProductBranchStock.findOne(stockQuery);
-  const currentQuantity = Number(existingStock?.quantity || 0);
-  const nextQuantity = operation === 'set'
-    ? normalizedQuantity
-    : currentQuantity + normalizedQuantity;
-
-  await ProductBranchStock.findOneAndUpdate(
-    stockQuery,
-    {
-      $set: {
-        quantity: nextQuantity,
-        updatedBy: staffId || ''
+    for (const { quantity, operation = 'set', variationId = '' } of items) {
+      const amount = Number(quantity);
+      if (quantity == null || quantity === '' || !Number.isFinite(amount) || amount < 0) {
+        throw new Error('Stock quantity must be a nonnegative number');
       }
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
+      const variation = variationId ? product.variations.id(variationId) : null;
+      if (variationId && !variation) throw new Error('Product variation not found');
 
-  const updatedProduct = await recalculateProductStock(productId);
-  return await applyBranchStockToProduct(updatedProduct);
+      const query = { productId: String(productId), branchId: String(branchId), variationId };
+      const stock = await ProductBranchStock.findOne(query).session(session);
+      const previousQuantity = Number(stock?.quantity || 0);
+      if (!['set', 'increase', 'decrease'].includes(operation)) throw new Error('Invalid stock operation');
+      const quantities = {
+        set: amount,
+        increase: previousQuantity + amount,
+        decrease: previousQuantity - amount
+      };
+      const nextQuantity = quantities[operation];
+      if (nextQuantity < 0 || (!stock && operation === 'decrease')) {
+        const label = variationId ? ' for the selected variation' : '';
+        throw new Error(`Insufficient branch stock${label}. Available: ${previousQuantity}, Required: ${amount}`);
+      }
+      if (stock && nextQuantity === previousQuantity) continue;
+
+      await ProductBranchStock.updateOne(query, {
+        $set: { quantity: nextQuantity, updatedBy: staffId || '' }
+      }, { upsert: true, session });
+      if (nextQuantity !== previousQuantity) {
+        await StockHistory.create([{
+          ...query, variationName: variation?.name || '', previousQuantity,
+          quantity: nextQuantity, reason, staffId
+        }], { session });
+      }
+    }
+
+    const updatedProduct = await recalculateProductStock(productId, session);
+    if (reason !== 'Manual adjustment') return updatedProduct;
+    const rows = await ProductBranchStock.find({ productId: String(productId) }).session(session).lean();
+    const branches = await Branch.find({ isActive: { $ne: false } }).select('name').session(session).lean();
+    const branchNames = new Map(branches.map(branch => [String(branch._id), branch.name]));
+    return applyBranchStockRowsToProduct(updatedProduct, rows, branchNames);
+  });
+};
+
+const updateProductStock = (productId, quantity, operation = 'decrease', variationId = '', branchId = '', staffId = '', reason) =>
+  updateBranchStock(productId, branchId, staffId, [{ quantity, operation, variationId }], reason);
+
+const getStockHistory = async (productId, branchId, requestedPage) => {
+  const page = Math.max(1, Number.parseInt(requestedPage, 10) || 1);
+  const limit = 25;
+  const query = { productId };
+  if (branchId) query.branchId = branchId;
+  const [rows, total] = await Promise.all([
+    StockHistory.find(query).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    StockHistory.countDocuments(query)
+  ]);
+  const branchIds = [...new Set(rows.map(row => row.branchId))].filter(id => mongoose.isValidObjectId(id));
+  const staffIds = [...new Set(rows.map(row => row.staffId))].filter(id => mongoose.isValidObjectId(id));
+  const [branches, staff] = await Promise.all([
+    Branch.find({ _id: { $in: branchIds } }).select('name').lean(),
+    Staff.find({ _id: { $in: staffIds } }).select('firstName lastName').lean()
+  ]);
+  const branchNames = new Map(branches.map(branch => [String(branch._id), branch.name]));
+  const staffNames = new Map(staff.map(person => [String(person._id), `${person.firstName} ${person.lastName}`]));
+  return {
+    entries: rows.map(row => ({
+      ...row,
+      branchName: branchNames.get(row.branchId) || row.branchId,
+      staffName: staffNames.get(row.staffId) || row.staffId
+    })),
+    page,
+    totalPages: Math.max(1, Math.ceil(total / limit))
+  };
 };
 
 const getFeaturedProducts = async (limit = 8) => {
@@ -684,5 +700,7 @@ module.exports = {
   updateProduct,
   deleteProduct,
   updateProductStock,
+  updateBranchStock,
+  getStockHistory,
   getFeaturedProducts
 };

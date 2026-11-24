@@ -1,3 +1,5 @@
+const Branch = require('../../Branch/Model/index');
+const { isValidObjectId } = require('mongoose');
 const ProductService = require('../Service/index');
 
 const applyVariationImages = (variations, variationImages) => {
@@ -159,17 +161,16 @@ const deleteProduct = async (req, res) => {
 const updateStock = async (req, res) => {
   try {
     const productId = req.params.id;
-    const { quantity, operation, variationId } = req.body;
-    const branchId = req.staff.branchId;
+    const { quantity, operation, variationId, stockItems } = req.body;
+    const branchId = req.staff.role === 'Admin' ? req.body.branchId : req.staff.branchId;
+    if (!isValidObjectId(branchId) || !await Branch.exists({ _id: branchId, isActive: { $ne: false } })) {
+      return res.status(400).json({ message: 'Select an active branch' });
+    }
 
-    const product = await ProductService.updateProductStock(
-      productId,
-      quantity,
-      operation || 'set',
-      variationId || '',
-      branchId,
-      req.staff.staffId
-    );
+    const items = Array.isArray(stockItems)
+      ? stockItems.map(item => ({ quantity: item.quantity, variationId: item.variationId || '' }))
+      : [{ quantity, operation: operation || 'set', variationId: variationId || '' }];
+    const product = await ProductService.updateBranchStock(productId, branchId, req.staff.staffId, items);
 
     res.status(200).json({
       message: 'Branch stock updated successfully',
@@ -190,6 +191,19 @@ const getFeaturedProducts = async (req, res) => {
   }
 };
 
+const getStockHistory = async (req, res) => {
+  try {
+    const branchId = req.staff.role === 'Admin' ? req.query.branchId : req.staff.branchId;
+    if ((req.staff.role === 'Manager' || branchId !== undefined) && !isValidObjectId(branchId)) {
+      return res.status(400).json({ message: 'A valid branch is required' });
+    }
+    const history = await ProductService.getStockHistory(req.params.id, branchId, req.query.page);
+    res.json(history);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createProduct,
   getAllProducts,
@@ -199,5 +213,6 @@ module.exports = {
   updateProduct,
   deleteProduct,
   updateStock,
+  getStockHistory,
   getFeaturedProducts
 };

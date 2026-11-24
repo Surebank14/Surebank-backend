@@ -3141,7 +3141,8 @@ const decreaseStockThenSettleOrderItem = async (order, item, staff) => {
     'decrease',
     item.variationId || '',
     fulfillmentBranchId,
-    staff?.staffId || ''
+    staff?.staffId || '',
+    'Ecommerce fulfillment'
   );
 
   try {
@@ -3156,7 +3157,8 @@ const decreaseStockThenSettleOrderItem = async (order, item, staff) => {
         'increase',
         item.variationId || '',
         fulfillmentBranchId,
-        staff?.staffId || ''
+        staff?.staffId || '',
+        'Ecommerce fulfillment reversed'
       );
     } catch (restoreErr) {
       console.error(`Failed to restore stock for product ${item.productId}:`, restoreErr.message);
@@ -4148,7 +4150,7 @@ const recordOutrightPayment = async (orderId, transactionRef) => {
   return verifyOrder;
 };
 
-const cancelOrder = async (orderId, reason) => {
+const cancelOrder = async (orderId, reason, staffId) => {
   const order = await EcommerceOrder.findById(orderId);
   if (!order) {
     throw new Error('Order not found');
@@ -4166,7 +4168,8 @@ const cancelOrder = async (orderId, reason) => {
       'increase',
       item.variationId || '',
       order.branchId,
-      ''
+      staffId || '',
+      'Ecommerce order cancelled'
     );
   }
 
