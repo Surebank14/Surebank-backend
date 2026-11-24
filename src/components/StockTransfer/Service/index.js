@@ -99,7 +99,8 @@ const createTransfer = async ({ productId, variationId = '', destinationBranchId
     'decrease',
     variationId || '',
     sourceBranchId,
-    staff.staffId
+    staff.staffId,
+    'Transfer sent'
   );
 
   try {
@@ -121,7 +122,8 @@ const createTransfer = async ({ productId, variationId = '', destinationBranchId
       'increase',
       variationId || '',
       sourceBranchId,
-      staff.staffId
+      staff.staffId,
+      'Transfer creation reversed'
     );
     throw error;
   }
@@ -214,7 +216,8 @@ const acceptTransfer = async (transferId, staff, responseNote = '') => {
     'increase',
     transfer.variationId || '',
     destinationBranchId,
-    staff.staffId
+    staff.staffId,
+    'Transfer accepted'
   );
 
   transfer.status = 'accepted';
@@ -226,14 +229,15 @@ const acceptTransfer = async (transferId, staff, responseNote = '') => {
   return await populateTransfer(transfer);
 };
 
-const returnReservedStock = async (transfer, staffId) => {
+const returnReservedStock = async (transfer, staffId, reason) => {
   await ProductService.updateProductStock(
     transfer.productId,
     transfer.quantity,
     'increase',
     transfer.variationId || '',
     transfer.sourceBranchId,
-    staffId
+    staffId,
+    reason
   );
 };
 
@@ -250,7 +254,7 @@ const rejectTransfer = async (transferId, staff, responseNote = '') => {
     throw new Error('Only the destination branch manager can reject this transfer');
   }
 
-  await returnReservedStock(transfer, staff.staffId);
+  await returnReservedStock(transfer, staff.staffId, 'Transfer rejected');
   transfer.status = 'rejected';
   transfer.rejectedBy = staff.staffId;
   transfer.rejectedAt = new Date();
@@ -273,7 +277,7 @@ const cancelTransfer = async (transferId, staff) => {
     throw new Error('Only the source branch manager can cancel this transfer');
   }
 
-  await returnReservedStock(transfer, staff.staffId);
+  await returnReservedStock(transfer, staff.staffId, 'Transfer cancelled');
   transfer.status = 'cancelled';
   transfer.cancelledBy = staff.staffId;
   transfer.cancelledAt = new Date();

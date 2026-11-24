@@ -198,7 +198,8 @@ const updateSBItemStock = async (sbaccount, item, operation, staffId) => {
     operation,
     item.variationId || '',
     sbaccount.branchId,
-    staffId || ''
+    staffId || '',
+    operation === 'decrease' ? 'SB item delivered' : 'SB delivery reversed'
   );
 };
 

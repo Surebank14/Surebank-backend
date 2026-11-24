@@ -593,7 +593,7 @@ const cancelOrder = async (req, res) => {
     const orderId = req.params.id;
     const { reason } = req.body;
 
-    const order = await EcommerceOrderService.cancelOrder(orderId, reason);
+    const order = await EcommerceOrderService.cancelOrder(orderId, reason, req.staff.staffId);
 
     res.status(200).json({
       message: 'Order cancelled',
